@@ -1,0 +1,11 @@
+# Cloudflare Tunnel configuration for PhishGuard (sample).
+# Copy to /etc/cloudflared/config.yml on the VPS and replace the tunnel ID
+# and credentials file with the values from `cloudflared tunnel create`.
+
+tunnel: 7bc9a812-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+credentials-file: /root/.cloudflared/7bc9a812-xxxx.json
+
+ingress:
+  - hostname: api.yourdomain.com
+    service: http://localhost:5000
+  - service: http_status:404
