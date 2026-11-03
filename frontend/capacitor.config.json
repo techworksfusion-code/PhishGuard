@@ -1,0 +1,5 @@
+{
+  "appId": "com.phishguard.app",
+  "appName": "PhishGuard",
+  "webDir": "dist"
+}
