@@ -384,7 +384,8 @@ npx cap sync
 npx cap open android   # Android Studio: Build > Build APK(s)
 The app calls import.meta.env.VITE_API_URL + '/api/check-link'. Capacitor's Android WebView uses the origin https://localhost, which the server's cors() setting allows.
 8A. Automatic SMS Detection and Blocking (Android)
-The app checks every incoming SMS in the background, with no pasting needed. A native Android receiver catches the message, extracts its links, asks the same server API for a verdict, and acts on it. Because the app is already an APK, this is added as a small custom Capacitor plugin written in Kotlin.
+(The complete implementation-level spec for this section — every Java class, method, payload, constant, screen flow, and test — is in REALTIME_PROTECTION_DESIGN.md, which governs if any detail here differs.)
+The app checks every incoming SMS in the background, with no pasting needed. A native Android receiver catches the message, extracts its links, asks the same server API for a verdict, and acts on it. Because the app is already an APK, this is added as a small custom Capacitor plugin written in Java (the Capacitor Android shell is Java everywhere; no Kotlin toolchain is added). The implementation-level specification is in REALTIME_PROTECTION_DESIGN.md.
 What "blocking" means on Android
 A normal app cannot stop another SMS app from showing a message. PhishGuard therefore blocks in four levels:
 Level
@@ -415,11 +416,11 @@ Component
 Role
 AndroidManifest.xml
 Declares RECEIVE_SMS, INTERNET, POST_NOTIFICATIONS and the receiver
-SmsReceiver.kt
+SmsReceiver.java
 Background BroadcastReceiver: extract links, call API, decide, notify
-PhishGuardStore.kt
+PhishGuardStore.java
 Saves the Blocked list and sender blocklist (SharedPreferences, or Room for a bigger project)
-PhishGuardPlugin.kt
+PhishGuardPlugin.java
 Capacitor plugin: getBlocked(), unblockSender(), restore(), requestPermissions()
 React Blocked screen
 Lists quarantined messages with Restore, Delete and Unblock buttons

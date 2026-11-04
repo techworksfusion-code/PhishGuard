@@ -3,7 +3,7 @@
 **Fake Link / Phishing Warn Tool** — an Android app where a user pastes any link received by SMS, WhatsApp or email and instantly sees a clear verdict (**Low risk**, **Suspicious** or **Dangerous**) with plain-language reasons.
 
 > Project for the AKTU Innovation and Design Thinking Lab (BME152/BME252), Problem Statement No. 48.
-> Full design details: [System_Design.md](System_Design.md) · Source layout: [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)
+> Full design details: [System_Design.md](System_Design.md) · Source layout: [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) · Backend build plan: [BACKEND_DESIGN.md](BACKEND_DESIGN.md) · Real-time SMS protection: [REALTIME_PROTECTION_DESIGN.md](REALTIME_PROTECTION_DESIGN.md)
 
 ## Features
 
@@ -47,7 +47,7 @@ Copy `frontend/.env.example` to `.env.local`, set `VITE_API_URL` to the HTTPS UR
 
 ## Quick start (backend)
 
-The Express backend is a planned scaffold area; its API contract, environment variables, and reference implementation are documented in [`backend/README.md`](backend/README.md). Deployment steps (PM2, Cloudflare Tunnel, Arch Linux VPS) live in [`deployment/README.md`](deployment/README.md).
+The Express backend is a planned scaffold area; its API contract, environment variables, and reference implementation are documented in [`backend/README.md`](backend/README.md). The full backend design — module structure, PostgreSQL schema, and user workflows — is in [`BACKEND_DESIGN.md`](BACKEND_DESIGN.md). Deployment steps (PM2, Cloudflare Tunnel, Arch Linux VPS) live in [`deployment/README.md`](deployment/README.md).
 
 ## Android build
 

@@ -3,6 +3,11 @@
 The system overview, requirements, detection rules, API outline, and deployment
 notes are in the repository-root [System_Design.md](../System_Design.md).
 See [PROJECT_STRUCTURE.md](../PROJECT_STRUCTURE.md) for the source layout.
+Implementation-level specifications: [BACKEND_DESIGN.md](../BACKEND_DESIGN.md)
+(server modules, database schema, user workflows) and
+[REALTIME_PROTECTION_DESIGN.md](../REALTIME_PROTECTION_DESIGN.md)
+(background SMS interception with real-time Gemini scoring — implements
+`System_Design.md` §8A).
 
 ## Frontend setup
 

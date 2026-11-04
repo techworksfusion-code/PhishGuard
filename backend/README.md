@@ -2,6 +2,8 @@
 
 > **Status: planned scaffold.** The `src/` folders are placeholders. This document is the authoritative contract the server must implement, matching `System_Design.md` §7. The React demo analyzer mirrors these rules client-side until the API is deployed.
 
+Module structure, database schema, and user workflows: [`../BACKEND_DESIGN.md`](../BACKEND_DESIGN.md).
+
 ## Stack
 
 - Node.js + Express (PM2-managed) on port **5000**
@@ -18,6 +20,9 @@ Copy `.env.example` (create it locally — real credentials are never committed)
 | `GEMINI_API_KEY` | Key from [ai.google.dev](https://ai.google.dev) |
 | `GEMINI_MODEL` | Current Flash model name (`gemini-1.5-flash` is retired) |
 | `PORT` | Defaults to `5000` |
+| `ALERT_PEPPER` | 32-byte random salt for `sender_hash` in `alert_events` (real-time path) |
+| `SCAN_RATE_PER_TOKEN` | Per-token rate cap on `/api/scan-message`; defaults to `20` |
+| `GEMINI_DAILY_MAX` | Per-day Gemini call ceiling; over-cap falls back to rules with `"ai": "unavailable"` |
 
 ## API
 
@@ -49,6 +54,26 @@ Response `200`:
 ```
 
 Scoring rules and verdict bands (0–29 Low risk, 30–59 Suspicious, 60–100 Dangerous) are defined in [`System_Design.md` §5](../System_Design.md). The final score is the **higher** of the rule score and the AI score; if Gemini fails, the rule result is returned with `"ai": "unavailable"`.
+
+#### `POST /api/scan-message` (real-time SMS alerts — background receiver path)
+
+Same rules + Gemini pipeline as `check-link`, driven from the Android
+background receiver. Request carries **only** the URL, a SHA-256 sender hash,
+and a link count — never message text or the sender number. Response is the
+check-link DTO with an additive `"alertId"` field and writes an `alert_events`
+row. Rate limits: 30 req/min global, 20 req/min per token, 10-minute URL
+verdict cache. Full design: [`../REALTIME_PROTECTION_DESIGN.md`](../REALTIME_PROTECTION_DESIGN.md) §5.
+
+```json
+{ "url": "http://free-recharge-jio.xyz/claim", "senderHash": "9f2c…64hex", "linkCount": 2 }
+```
+
+#### `GET /api/alerts`
+
+Returns the last 20 `alert_events` for the signed-in account (requires
+`Authorization: Bearer`); used by the in-app Blocked/alert screens after
+reinstall. Backend structure and DB schema for all of these are specified in
+[`BACKEND_DESIGN.md`](../BACKEND_DESIGN.md).
 
 ### `GET /api/history`
 
