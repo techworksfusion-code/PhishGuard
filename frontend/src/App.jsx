@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import { checkLink, isDemoMode } from './services/api.js';
 import { analyzeDemoLink } from './utils/demoAnalyzer.js';
 
@@ -197,8 +199,9 @@ function Toggle({ checked, onChange, label }) {
 export default function App() {
   const [authStage, setAuthStage] = useState('splash');
   const [account, setAccount] = useState({ name: 'Alex Morgan', email: 'alex@example.com' });
-  const [tab, setTab] = useState('home');
-  const [page, setPage] = useState('');
+  const [tab, setTabState] = useState('home');
+  const [page, setPageState] = useState('');
+  const navigationDepth = useRef(0);
   const [url, setUrl] = useState('');
   const [scan, setScan] = useState(null);
   const [error, setError] = useState('');
@@ -216,6 +219,62 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [authStage]);
 
+  useEffect(() => {
+    if (authStage !== 'app') return undefined;
+
+    navigationDepth.current = 0;
+    const currentRoute = { tab, page, depth: navigationDepth.current };
+    const routeState = { phishGuardRoute: currentRoute };
+    window.history.replaceState(routeState, '', window.location.href);
+
+    function handlePopState(event) {
+      const previousRoute = event.state?.phishGuardRoute;
+      if (previousRoute) {
+        navigationDepth.current = previousRoute.depth || 0;
+        setTabState(previousRoute.tab);
+        setPageState(previousRoute.page);
+        return;
+      }
+
+      const homeRoute = { tab: 'home', page: '', depth: 0 };
+      navigationDepth.current = homeRoute.depth;
+      setTabState(homeRoute.tab);
+      setPageState(homeRoute.page);
+      window.history.replaceState({ phishGuardRoute: homeRoute }, '', window.location.href);
+    }
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [authStage]);
+
+  useEffect(() => {
+    if (authStage !== 'app' || !Capacitor.isNativePlatform()) return undefined;
+
+    let active = true;
+    let backButtonListener;
+    CapacitorApp.addListener('backButton', () => {
+      const currentRoute = window.history.state?.phishGuardRoute;
+      if (currentRoute?.depth > 0) {
+        window.history.back();
+      } else {
+        CapacitorApp.exitApp();
+      }
+    }).then((listener) => {
+      if (active) {
+        backButtonListener = listener;
+      } else {
+        listener.remove();
+      }
+    }).catch((error) => {
+      console.error('Unable to register the native back-button handler.', error);
+    });
+
+    return () => {
+      active = false;
+      backButtonListener?.remove();
+    };
+  }, [authStage]);
+
   const visibleMessages = useMemo(() => sampleMessages.filter((message) => {
     const matchesSearch = `${message.sender} ${message.text}`.toLowerCase().includes(search.toLowerCase());
     const matchesFilter = filter === 'All' || (filter === 'Unread' && message.unread) || (filter === 'Blocked' && message.blocked);
@@ -228,14 +287,40 @@ export default function App() {
       onStageChange={setAuthStage}
       onComplete={(newAccount) => {
         setAccount(newAccount);
-        setTab('home');
-        setPage('');
+        setTabState('home');
+        setPageState('');
         setAuthStage('app');
       }}
     />;
   }
 
-  function openTab(id) { setTab(id); setPage(''); setSelectedMessage(null); }
+  function navigateTo(nextTab, nextPage = '') {
+    if (tab === nextTab && page === nextPage) return;
+
+    if (authStage === 'app') {
+      const depth = navigationDepth.current + 1;
+      navigationDepth.current = depth;
+      window.history.pushState({ phishGuardRoute: { tab: nextTab, page: nextPage, depth } }, '', window.location.href);
+    }
+    setTabState(nextTab);
+    setPageState(nextPage);
+  }
+
+  function setPage(nextPage) {
+    if (!nextPage) {
+      goBack();
+      return;
+    }
+    navigateTo(tab, nextPage);
+  }
+  function goBack() {
+    if (navigationDepth.current > 0) {
+      window.history.back();
+    } else {
+      navigateTo('home');
+    }
+  }
+  function openTab(id) { navigateTo(id); setSelectedMessage(null); }
   async function runScan(event) {
     event?.preventDefault();
     setError('');
@@ -379,7 +464,7 @@ export default function App() {
     if (page === 'scan-result') return renderScanResult();
     if (['protection', 'notifications', 'privacy', 'subscription', 'account', 'support'].includes(page)) return renderSettingPage();
     if (['message-details', 'blocked-details', 'conversation'].includes(page)) return renderMessageDetail();
-    if (page === 'forensics') return <Forensics onBack={() => setPage('')} />;
+    if (page === 'forensics') return <Forensics onBack={goBack} />;
     if (page) return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Back</button><SectionTitle title={page === 'notifications' ? 'Notifications' : 'Your activity'} /></div>;
     if (tab === 'home') return renderHome();
     if (tab === 'inbox') return renderInbox();
@@ -395,12 +480,12 @@ export default function App() {
       <p className="sidebar-caption">YOUR PROTECTION</p>
       {navItems.map((item) => <button key={item.id} className={`side-nav-item ${topTab && tab === item.id && !page ? 'selected' : ''}`} onClick={() => openTab(item.id)}><Icon name={item.icon} size={19} />{item.label}</button>)}
       <div className="sidebar-spacer" />
-      <button className={`side-nav-item ${!topTab ? 'selected' : ''}`} onClick={() => { setTab('profile'); setPage(''); }}><Icon name="user" size={19} />Profile</button>
+      <button className={`side-nav-item ${!topTab ? 'selected' : ''}`} onClick={() => openTab('profile')}><Icon name="user" size={19} />Profile</button>
       <div className="sidebar-protection"><Icon name="shield" /><strong>Protection active</strong><small>You're covered around the clock.</small></div>
       <div className="sidebar-user"><span className="profile-avatar small">{account.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</span><span><strong>{account.name}</strong><small>Personal account</small></span><Icon name="more" /></div>
     </aside>
     <div className="app-main">
-      <header className="desktop-topbar"><Brand compact /><span className="topbar-status"><i /> Protection active</span><button className="icon-button" aria-label="Open profile" onClick={() => { setTab('profile'); setPage(''); }}><Icon name="user" /></button></header>
+      <header className="desktop-topbar"><Brand compact /><span className="topbar-status"><i /> Protection active</span><button className="icon-button" aria-label="Open profile" onClick={() => openTab('profile')}><Icon name="user" /></button></header>
       <div className="app-scroll" key={`${tab}-${page}`}>{renderPage()}</div>
       <nav className="bottom-nav" aria-label="Primary navigation">{[...navItems, { id: 'profile', label: 'Profile', icon: 'user' }].map((item) => <button key={item.id} className={`${tab === item.id && !page ? 'active' : ''}`} onClick={() => openTab(item.id)}><Icon name={item.icon} size={20} /><span>{item.label}</span></button>)}</nav>
       <div className="home-indicator" />

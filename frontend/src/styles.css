@@ -478,12 +478,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fb4c0080; outlin
   .auth-form-screen { padding-top: max(78px, calc(env(safe-area-inset-top) + 68px)); }
   .splash-brand { left: 25px; }
   .splash-skip { right: 25px; }
-  .app-shell { display: block; padding: 0; min-height: 100dvh; }
+  .app-shell { display: block; width: 100%; height: 100dvh; min-height: 0; overflow: hidden; padding: 0; }
   .desktop-sidebar, .desktop-aside, .desktop-topbar { display: none; }
-  .app-main { min-height: 100dvh; height: 100dvh; border: 0; border-radius: 0; box-shadow: none; }
-  .app-scroll { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .app-main { min-height: 0; height: 100%; border: 0; border-radius: 0; box-shadow: none; }
+  .app-scroll { padding-bottom: env(safe-area-inset-bottom, 0px); scrollbar-width: none; }
+  .app-scroll::-webkit-scrollbar { display: none; }
   .bottom-nav { height: calc(64px + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); }
-  .home-indicator { display: block; position: absolute; z-index: 3; width: 108px; height: 4px; border-radius: 8px; bottom: calc(7px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); background: var(--deep); pointer-events: none; }
+  .home-indicator { display: none; }
   .home-view .hero { padding: max(22px, env(safe-area-inset-top)) 25px 22px; }
   .home-content, .page-content { padding: 24px 25px 30px; }
   .page-content { padding-top: max(22px, env(safe-area-inset-top)); }
