@@ -1,7 +1,8 @@
 # PhishGuard project structure
 
-The repository is organized as a React/Capacitor client, a planned Express API,
-deployment configuration, and implementation-level design documents.
+The repository contains a React/Capacitor client, an M0–M1 Express API
+foundation with later modules planned, deployment configuration, and
+implementation-level design documents.
 
 ```text
 PhishGuard/
@@ -15,19 +16,25 @@ PhishGuard/
 ├── docs/
 │   ├── README.md                   # Setup + status of demo/prototype features
 │   └── Design/                     # UI design captures (PNG screenshots)
-├── backend/                        # 🚧 Planned — see BACKEND_DESIGN.md and backend/README.md
+├── backend/                        # M0–M1 implemented — see BACKEND_DESIGN.md and backend/README.md
 │   ├── README.md                   # Authoritative API contract (check-link is locked)
+│   ├── package.json                # Express, SQLite, middleware, and test scripts
+│   ├── package-lock.json           # Reproducible npm dependency graph
+│   ├── .env.example                # Local API configuration template
 │   ├── db/
 │   │   └── migrations/             # Real, ready-to-run SQL:
 │   │       ├── 001_init.sql        #   users, otp_codes, sessions, urls, checks
 │   │       ├── 002_threat_reports.sql  # threat_votes + url_threat_stats view
 │   │       └── 003_alerts.sql      #   alert_events (real-time SMS alerts)
 │   ├── src/
-│   │   ├── middleware/.gitkeep     # auth, rateLimit, validate, errorHandler (M0)
-│   │   ├── routes/.gitkeep         # auth, checks, guards, votes, health (M0/M3/M5)
-│   │   ├── services/.gitkeep       # analyzer, gemini, auth/otp/token, alerts (M0–M5)
-│   │   └── utils/.gitkeep          # normalizeUrl, verdict bands, logger (M1)
-│   └── tests/.gitkeep
+│   │   ├── app.js / server.js      # Express bootstrap and HTTP startup
+│   │   ├── config/                 # Environment validation
+│   │   ├── db/                     # SQLite connection and migration runner
+│   │   ├── middleware/             # Request logging, validation, auth stubs, error/rate handling
+│   │   ├── routes/                 # Health endpoint
+│   │   ├── services/               # URL upsert and deduplication
+│   │   └── utils/                  # URL normalization, HTTP errors, verdict bands
+│   └── tests/                      # Node test runner + Supertest coverage for M0–M1
 ├── frontend/
 │   ├── .env.example
 │   ├── vite.config.js
@@ -77,8 +84,9 @@ PhishGuard/
 
 ### Code
 
-- Backend implementation is planned (see `backend/README.md` for the locked
-  `POST /api/check-link` contract and `BACKEND_DESIGN.md` for the build order).
+- Backend M0–M1 are implemented (see `backend/README.md` for setup and the
+  locked `POST /api/check-link` contract, and `BACKEND_DESIGN.md` for the build
+  order). Link analysis, authentication, and real-time alerts remain planned.
   The migrations in `backend/db/migrations/` are real and idempotent.
 - `frontend/src/App.jsx` contains the responsive preview screens with
   browser-history navigation and native Android back-button support
