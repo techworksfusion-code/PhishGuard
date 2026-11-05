@@ -6,9 +6,10 @@
 > the backend must support. The `POST /api/check-link` contract in
 > `backend/README.md` is locked — everything here extends it, never changes it.
 >
-> The schema also ships as ready-to-run migrations:
+> The schema also ships as ready-to-run SQLite migrations:
 > [`backend/db/migrations/001_init.sql`](backend/db/migrations/001_init.sql) ·
-> [`backend/db/migrations/002_threat_reports.sql`](backend/db/migrations/002_threat_reports.sql)
+> [`backend/db/migrations/002_threat_reports.sql`](backend/db/migrations/002_threat_reports.sql) ·
+> [`backend/db/migrations/003_alerts.sql`](backend/db/migrations/003_alerts.sql)
 
 ---
 
@@ -19,7 +20,7 @@
 | Concern | Choice | Rationale |
 |---|---|---|
 | Runtime | Node.js 20 LTS + Express 4 | Matches the documented stack; PM2-managed on port 5000 |
-| Database | PostgreSQL 16 | Unique constraints on phone/email/URL hash, JSONB for signals, simple retention via cron SQL. SQLite is an acceptable dev fallback via `DATABASE_URL=sqlite://./dev.db` |
+| Database | SQLite 3 via `better-sqlite3` | Single-file, zero-install DB; unique constraints on phone/email/URL hash kept, JSON documents stored as `TEXT`, retention via simple cron SQL. Path set with `DATABASE_URL` (e.g. `sqlite://./data/phishguard.db`); file auto-created |
 | Migrations | Plain `.sql` files + tiny runner script | No ORM knowledge required; schema stays reviewable |
 | Auth | Session tokens (48 random bytes, sent as `Authorization: Bearer`) | Capacitor WebViews make cookies unreliable; tokens are simpler and revocable |
 | Password hashing | `argon2id` (`argon2` npm package) | Standard choice; OTP codes hashed the same way |
@@ -39,9 +40,9 @@ backend/
 │   ├── config/
 │   │   └── index.js           # reads env once, fails fast on missing vars
 │   ├── db/
-│   │   ├── index.js           # pg Pool singleton
+│   │   ├── index.js           # better-sqlite3 singleton (WAL mode, foreign_keys=ON)
 │   │   ├── migrate.js         # applies migrations/*.sql in order, tracks them
-│   │   └── migrations/        # 001_init.sql, 002_threat_reports.sql
+│   │   └── migrations/        # 001_init.sql, 002_threat_reports.sql, 003_alerts.sql
 │   ├── routes/
 │   │   ├── index.js           # mounts all routers under /api
 │   │   ├── auth.routes.js     # register, login, otp, session, sign-out
@@ -117,7 +118,7 @@ analysis · `429` rate limited · `500` unexpected (logged, never leaked).
   reinstall.
 - The server stores **URLs, never message text or sender numbers** — SMS
   content never reaches the backend.
-- Retention is schema-enforced (partial indexes + cron), not "left to ops".
+- Retention is schema-enforced (partial indexes + retention cron), not "left to ops".
 
 ### 2.2 ER overview
 
@@ -126,7 +127,7 @@ users 1──* sessions           urls 1──* checks *──1 users (nullable 
 users 1──* otp_codes (issued per destination row)
 urls 1──* threat_votes *──1 users (nullable = anonymous vote)
 urls 1──* alert_events *──1 users (nullable)     ← real-time SMS alerts (§003)
-urls 1──1 url_threat_stats    (materialized aggregate)
+urls 1──1 url_threat_stats    (read-time view, no refresh job)
 ```
 
 ### 2.3 Applied schema files
@@ -134,7 +135,7 @@ urls 1──1 url_threat_stats    (materialized aggregate)
 | Migration | Contents |
 |---|---|
 | `001_init.sql` | `users`, `otp_codes`, `sessions`, `urls`, `checks` |
-| `002_threat_reports.sql` | `threat_votes`, `url_threat_stats` materialized view (phase 2) |
+| `002_threat_reports.sql` | `threat_votes`, `url_threat_stats` view (phase 2) |
 | `003_alerts.sql` | `alert_events` — real-time SMS protection events |
 
 The column-level data dictionary is in **§6** below.
@@ -246,7 +247,7 @@ Reinstall/new device → sign in → GET /api/history → repopulate the list.
 ```text
 App                                Backend
 POST /links/:hash/vote { vote } →  upsert threat_votes (one per account)
-GET  /links/:hash/summary       →  url_threat_stats (materialized view)
+GET  /links/:hash/summary       →  url_threat_stats (view)
 ```
 
 ### 4.6 Account deletion
@@ -259,22 +260,22 @@ Honor the "your data stays yours" promise in the UI footnote.
 
 ## 5. Data dictionary
 
-Types are PostgreSQL. *PII* marks columns that count as personal data.
+Types are the SQLite dialect. `INTEGER` PKs are rowid aliases (auto-increment), `TEXT`-in-ISO-8601-UTC replaces `TIMESTAMPTZ`, and JSON documents (`settings`, `signals`) live in `TEXT` columns. `VARCHAR(n)`, `SMALLINT`, `BIGINT` and `BOOLEAN` are written as-is for readability — SQLite accepts them but stores everything by affinity and does **not** enforce length limits. *PII* marks columns that count as personal data.
 
 ### 5.1 `users` — one row per account
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `id` | BIGSERIAL | PK | Internal surrogate ID |
+| `id` | INTEGER (auto-increments) | PK | Internal surrogate ID |
 | `name` | VARCHAR(80) | NOT NULL | Display name |
 | `email` | VARCHAR(254) | UNIQUE, nullable (PII) | NULL for phone-only accounts |
 | `phone` | VARCHAR(20) | UNIQUE, nullable (PII) | E.164-ish; NULL for email accounts |
 | `password_hash` | TEXT | nullable | argon2id; must be non-NULL when email present (CHECK) |
 | `history_sync` | BOOLEAN | NOT NULL DEFAULT FALSE | Opt-in server storage of checks |
-| `settings` | JSONB | NOT NULL DEFAULT `{}` | Mirror of app protection toggles |
-| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
-| `last_login_at` | TIMESTAMPTZ | nullable | Updated on successful login |
-| `deleted_at` | TIMESTAMPTZ | nullable | Soft delete (§4.6) |
+| `settings` | TEXT (JSON document) | NOT NULL DEFAULT `{}` | Mirror of app protection toggles |
+| `created_at` | TEXT (ISO-8601 UTC) | NOT NULL DEFAULT now() | |
+| `last_login_at` | TEXT (ISO-8601 UTC) | nullable | Updated on successful login |
+| `deleted_at` | TEXT (ISO-8601 UTC) | nullable | Soft delete (§4.6) |
 
 CHECKs: at least one contact channel; email ⇒ password.
 
@@ -282,50 +283,50 @@ CHECKs: at least one contact channel; email ⇒ password.
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `id` | BIGSERIAL | PK | |
+| `id` | INTEGER (auto-increments) | PK | |
 | `destination` | VARCHAR(254) | NOT NULL, indexed | Email or phone the code was sent to |
 | `code_hash` | CHAR(64) | NOT NULL | sha256(code + TOKEN_PEPPER) — never the code itself |
 | `purpose` | VARCHAR(12) | NOT NULL, CHECK `register`/`login` | |
 | `attempts` | SMALLINT | NOT NULL DEFAULT 0 | ≥ 5 ⇒ locked; user must re-request |
-| `expires_at` | TIMESTAMPTZ | NOT NULL | issued + 10 min |
-| `consumed_at` | TIMESTAMPTZ | nullable | Set on success; row then purged |
-| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | Drives 60 s resend cooldown |
+| `expires_at` | TEXT (ISO-8601 UTC) | NOT NULL | issued + 10 min |
+| `consumed_at` | TEXT (ISO-8601 UTC) | nullable | Set on success; row then purged |
+| `created_at` | TEXT (ISO-8601 UTC) | NOT NULL DEFAULT now() | Drives 60 s resend cooldown |
 
 ### 5.3 `sessions` — one row per active login
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `id` | BIGSERIAL | PK | |
+| `id` | INTEGER (auto-increments) | PK | |
 | `user_id` | BIGINT | NOT NULL FK→users ON DELETE CASCADE | |
 | `token_hash` | CHAR(64) | NOT NULL UNIQUE | sha256(bearer token + pepper); raw token never stored |
 | `user_agent` | VARCHAR(200) | nullable | Debug aid only |
-| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
-| `expires_at` | TIMESTAMPTZ | NOT NULL | created + 30 days |
-| `revoked_at` | TIMESTAMPTZ | nullable | Sign-out / "sign out everywhere" |
+| `created_at` | TEXT (ISO-8601 UTC) | NOT NULL DEFAULT now() | |
+| `expires_at` | TEXT (ISO-8601 UTC) | NOT NULL | created + 30 days |
+| `revoked_at` | TEXT (ISO-8601 UTC) | nullable | Sign-out / "sign out everywhere" |
 
 ### 5.4 `urls` — deduplicated check targets (non-personal)
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `id` | BIGSERIAL | PK | Referenced by `checks` and `threat_votes` |
+| `id` | INTEGER (auto-increments) | PK | Referenced by `checks` and `threat_votes` |
 | `url_hash` | CHAR(64) | NOT NULL UNIQUE | sha256 of normalized URL |
 | `url` | TEXT | NOT NULL | Normalized form (scheme, lowercase host) |
 | `host` | VARCHAR(253) | NOT NULL, indexed | Hostname for community stats |
-| `first_seen_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
-| `last_seen_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | Bumped on re-check |
+| `first_seen_at` | TEXT (ISO-8601 UTC) | NOT NULL DEFAULT now() | |
+| `last_seen_at` | TEXT (ISO-8601 UTC) | NOT NULL DEFAULT now() | Bumped on re-check |
 
 ### 5.5 `checks` — one row per analysis (the audit trail)
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `id` | BIGSERIAL | PK | |
+| `id` | INTEGER (auto-increments) | PK | |
 | `user_id` | BIGINT | FK→users ON DELETE SET NULL, nullable | NULL = anonymous check |
 | `url_id` | BIGINT | NOT NULL FK→urls | |
 | `score` | SMALLINT | NOT NULL CHECK 0–100 | Merged rules-vs-AI score |
 | `verdict` | VARCHAR(10) | NOT NULL CHECK enum | `Low risk`/`Suspicious`/`Dangerous` |
 | `ai_status` | VARCHAR(11) | NOT NULL CHECK enum | `ok` / `unavailable` |
-| `signals` | JSONB | NOT NULL | Array of `{ name, points, detail }` — full rule audit |
-| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | Retention key (§2.4) |
+| `signals` | TEXT (JSON document) | NOT NULL | Array of `{ name, points, detail }` — full rule audit |
+| `created_at` | TEXT (ISO-8601 UTC) | NOT NULL DEFAULT now() | Retention key (§2.4) |
 
 Indexes: `(user_id, created_at DESC)` history-reads; `(url_id, created_at DESC)`
 per-URL stats; partial index on `(created_at) WHERE user_id IS NULL` for the
@@ -335,23 +336,26 @@ retention sweep.
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `id` | BIGSERIAL | PK | |
+| `id` | INTEGER (auto-increments) | PK | |
 | `url_id` | BIGINT | NOT NULL FK→urls ON DELETE CASCADE | |
 | `reporter_id` | BIGINT | FK→users ON DELETE SET NULL, nullable | NULL = anonymous report |
 | `vote` | VARCHAR(10) | NOT NULL CHECK `dangerous`/`safe` | |
-| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() | |
+| `created_at` | TEXT (ISO-8601 UTC) | NOT NULL DEFAULT now() | |
 
 UNIQUE `(url_id, reporter_id)` — one vote per account per URL.
 
-### 5.7 `url_threat_stats` — materialized aggregate (refresh every 5 min)
+### 5.7 `url_threat_stats` — read-time view (no refresh job)
 
 | Column | Source | Notes |
 |---|---|---|
-| `url_id` | `urls.id` | UNIQUE index (required for concurrent refresh) |
+| `url_id` | `urls.id` | Join key to `urls` |
 | `host` | `urls.host` | Allows host-level summaries |
-| `dangerous_votes` | count FILTER | Powers the community card |
-| `safe_votes` | count FILTER | |
+| `dangerous_votes` | SUM of `vote = 'dangerous'` | Powers the community card; 0 when no votes |
+| `safe_votes` | SUM of `vote = 'safe'` | |
 | `last_voted_at` | max(created_at) | Staleness signal |
+
+Computed on read with conditional aggregation (`CASE`), since SQLite has no
+materialized views. Cheap at lab volume — both join columns are indexed.
 
 ---
 
@@ -364,9 +368,9 @@ each phase ends with something runnable against the existing frontend.
 
 | File | Responsibility | Depends on | Done when |
 |---|---|---|---|
-| `package.json` | deps: express, cors, pg, dotenv, helmet, express-rate-limit | – | `npm ci` works |
+| `package.json` | deps: express, cors, better-sqlite3, dotenv, helmet, express-rate-limit | – | `npm ci` works |
 | `src/config/index.js` | env load + validation, fail-fast | – | missing `GEMINI_API_KEY` → clear error |
-| `src/db/index.js` + `migrate.js` | pg Pool; applies migrations in order | config | 001 + 002 apply cleanly twice (idempotent) |
+| `src/db/index.js` + `migrate.js` | better-sqlite3 handle (WAL, foreign_keys=ON); applies migrations in order | config | 001–003 apply cleanly twice (idempotent) |
 | `src/app.js` / `src/server.js` | middleware chain §1.3; route mounting | db | `GET /api/health` → `{ ok: true }` |
 | `src/middleware/*` | logger, errorHandler, rateLimit, validate, auth stubs | app.js | 404 and error paths return JSON contract |
 
@@ -403,13 +407,13 @@ each phase ends with something runnable against the existing frontend.
 |---|---|---|---|
 | `src/services/checks.service.js` (extend) | honours `history_sync` on persist | M2, M3 | anonymous rows written, unsynced users' rows expire in 24 h |
 | `src/services/history.service.js` | user history fetch (≤ 20), device-first policy | M3 | sync-off user gets `[]`, sync-on gets rows |
-| `scripts/retention.js` | §2.4 deletions + view refresh | M0 | run twice ⇒ second run deletes nothing |
+| `scripts/retention.js` | §2.4 deletions (runs on a schedule; the stats view needs no refresh) | M0 | run twice ⇒ second run deletes nothing |
 
 ### M5 — Community votes (phase 2)
 
 | File | Responsibility | Depends on | Done when |
 |---|---|---|---|
-| `src/services/vote.service.js` | upsert vote (1/account/URL), view refresh hook | M4 | double vote is an update, not a duplicate |
+| `src/services/vote.service.js` | upsert vote (1/account/URL) | M4 | double vote is an update, not a duplicate |
 | `src/routes/votes.routes.js` | `POST /links/:hash/vote`, `GET /links/:hash/summary` | M5 above | summary powers the real community card |
 
 ### M6 — Hardening

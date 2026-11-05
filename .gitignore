@@ -4,6 +4,10 @@
 **/build/
 **/.gradle/
 
+# Local SQLite database files
+backend/data/
+**/*.db
+
 # Local environment and secrets
 **/.env
 **/.env.*

@@ -47,7 +47,7 @@ Copy `frontend/.env.example` to `.env.local`, set `VITE_API_URL` to the HTTPS UR
 
 ## Quick start (backend)
 
-The Express backend is a planned scaffold area; its API contract, environment variables, and reference implementation are documented in [`backend/README.md`](backend/README.md). The full backend design — module structure, PostgreSQL schema, and user workflows — is in [`BACKEND_DESIGN.md`](BACKEND_DESIGN.md). Deployment steps (PM2, Cloudflare Tunnel, Arch Linux VPS) live in [`deployment/README.md`](deployment/README.md).
+The Express backend is a planned scaffold area; its API contract, environment variables, and reference implementation are documented in [`backend/README.md`](backend/README.md). The full backend design — module structure, SQLite schema, and user workflows — is in [`BACKEND_DESIGN.md`](BACKEND_DESIGN.md). Deployment steps (PM2, Cloudflare Tunnel, Arch Linux VPS) live in [`deployment/README.md`](deployment/README.md).
 
 ## Android build
 

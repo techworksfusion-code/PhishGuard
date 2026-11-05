@@ -9,7 +9,7 @@ PhishGuard/
 ├── LICENSE
 ├── CONTRIBUTING.md
 ├── System_Design.md                # Lab design document (§8A real-time SMS protection)
-├── BACKEND_DESIGN.md               # Backend modules, PostgreSQL schema, user workflows
+├── BACKEND_DESIGN.md               # Backend modules, SQLite schema, user workflows
 ├── REALTIME_PROTECTION_DESIGN.md   # Detailed spec for System_Design §8A (Java + backend + React)
 ├── PROJECT_STRUCTURE.md
 ├── docs/
@@ -66,7 +66,7 @@ PhishGuard/
 
 - `System_Design.md` is the lab deliverable; §8A defines the real-time SMS
   feature (levels 1–3, byte-level blocking contract, tests A1–A5).
-- `BACKEND_DESIGN.md` specifies server module layout (M0–M6), the PostgreSQL
+- `BACKEND_DESIGN.md` specifies server module layout (M0–M6), the SQLite
   schema (the real migrations live in `backend/db/migrations/`), retention
   rules, and user workflows (register/OTP, link check, history, votes).
 - `REALTIME_PROTECTION_DESIGN.md` is the exact implementation spec for §8A:

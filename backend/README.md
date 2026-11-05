@@ -7,6 +7,7 @@ Module structure, database schema, and user workflows: [`../BACKEND_DESIGN.md`](
 ## Stack
 
 - Node.js + Express (PM2-managed) on port **5000**
+- SQLite via `better-sqlite3` — schema in [`../BACKEND_DESIGN.md`](../BACKEND_DESIGN.md) §2, ready-to-run migrations in [`db/migrations/`](db/migrations/)
 - `cors`, `express-rate-limit` (30 requests/minute per IP), `dotenv`
 - Google Gemini Flash via `@google/genai`
 - Rule engine module `src/analyzer.js` fed by `src/rules.json` (scam keywords, suspicious TLDs, shorteners, brand domains — keep lists here, not hard-coded)
@@ -19,6 +20,7 @@ Copy `.env.example` (create it locally — real credentials are never committed)
 |---|---|
 | `GEMINI_API_KEY` | Key from [ai.google.dev](https://ai.google.dev) |
 | `GEMINI_MODEL` | Current Flash model name (`gemini-1.5-flash` is retired) |
+| `DATABASE_URL` | SQLite connection string; path of the database file, auto-created (e.g. `sqlite://./data/phishguard.db`) |
 | `PORT` | Defaults to `5000` |
 | `ALERT_PEPPER` | 32-byte random salt for `sender_hash` in `alert_events` (real-time path) |
 | `SCAN_RATE_PER_TOKEN` | Per-token rate cap on `/api/scan-message`; defaults to `20` |
