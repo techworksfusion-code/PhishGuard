@@ -23,6 +23,8 @@ Copy `.env.example` (create it locally — real credentials are never committed)
 | `ALERT_PEPPER` | 32-byte random salt for `sender_hash` in `alert_events` (real-time path) |
 | `SCAN_RATE_PER_TOKEN` | Per-token rate cap on `/api/scan-message`; defaults to `20` |
 | `GEMINI_DAILY_MAX` | Per-day Gemini call ceiling; over-cap falls back to rules with `"ai": "unavailable"` |
+| `OTP_CHANNEL` | `console` (dev) \| `smtp` \| `telegram` \| `whatsapp` (Baileys — chosen production channel for the lab) |
+| `WHATSAPP_SESSION_DIR` | Directory holding the paired Baileys session keys (gitignored, backed up once) |
 
 ## API
 

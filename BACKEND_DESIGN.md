@@ -24,6 +24,7 @@
 | Auth | Session tokens (48 random bytes, sent as `Authorization: Bearer`) | Capacitor WebViews make cookies unreliable; tokens are simpler and revocable |
 | Password hashing | `argon2id` (`argon2` npm package) | Standard choice; OTP codes hashed the same way |
 | Email OTP delivery | `nodemailer` (SMTP); **console stub in dev** | `OTP_DELIVERY=console` prints codes to logs in development |
+| **OTP channel (chosen)** | **Baileys (`@whiskeysockets/baileys`) over WhatsApp — official decision** | Zero cost; the VPS runs one persistent WhatsApp session paired with the team's SIM (linked device). Experimental risk and mitigations: §1.5. Fallback channels by env: `OTP_CHANNEL=console\|smtp\|telegram\|whatsapp` |
 | Validation | Hand-rolled validators in `utils/` | Keep dependency count low for a student VPS |
 
 ### 1.2 Module layout
@@ -95,6 +96,16 @@ account/code mismatch · `413` payload too large · `422` URL rejected before
 analysis · `429` rate limited · `500` unexpected (logged, never leaked).
 
 ---
+
+### 1.5 OTP over WhatsApp (Baileys) — decision, risks, mitigations (design)
+
+| Risk | Mitigation in `delivery.service.js` |
+|---|---|
+| Number ban (unofficial automation) | Sending number = team's own SIM, linked once as a WhatsApp "linked device"; strictly user-triggered sends only (1 OTP per request, 60 s cooldown); never bulk/pattern traffic |
+| Session loss / QR re-pair | `scripts/baileys-pair.js` admin script; session keys persisted in `WHATSAPP_SESSION_DIR` (gitignored); auto-reconnect on `connection.update` with capped backoff |
+| Recipient not on WhatsApp | `sendMessage` failure ⇒ 503-style error is returned to the route and the OTP row is deleted — the user must choose the email path instead |
+| Deliverability (message archived as spam) | plain text, no links; the code is repeated in a second line; message starts with "PhishGuard" |
+| Unofficial dependency breaks on WhatsApp updates | single-file transport (`whatsapp.transport.js` behind a `SendChannel` interface) — swappable in minutes, `console`/`smtp` always available as fallback |
 
 ## 2. Database design
 
