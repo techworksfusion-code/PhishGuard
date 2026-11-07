@@ -2,7 +2,7 @@
 
 require('dotenv').config();
 
-const required = ['GEMINI_API_KEY', 'DATABASE_URL', 'TOKEN_PEPPER', 'ALERT_PEPPER'];
+const required = ['DATABASE_URL', 'TOKEN_PEPPER', 'ALERT_PEPPER'];
 
 function get(name, fallback) {
   const value = process.env[name];

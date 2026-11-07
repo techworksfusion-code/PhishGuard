@@ -1,0 +1,32 @@
+{
+  "keywords": [
+    "free-recharge", "win-lottery", "lucky-draw", "claim-prize", "kyc-update",
+    "kyc-verify", "verify-account", "refund", "free-gift", "cashback-offer"
+  ],
+  "suspiciousTlds": ["xyz", "top", "tk", "click", "icu", "buzz", "gq", "ml", "cf", "work"],
+  "brands": {
+    "sbi": ["sbi.co.in", "onlinesbi.sbi"],
+    "paytm": ["paytm.com"],
+    "amazon": ["amazon.in", "amazon.com"],
+    "jio": ["jio.com"],
+    "hdfc": ["hdfcbank.com"],
+    "phonepe": ["phonepe.com"]
+  },
+  "shorteners": ["bit.ly", "tinyurl.com", "cutt.ly", "rb.gy", "is.gd", "t.co", "goo.gl"],
+  "points": {
+    "scamKeyword": 25,
+    "suspiciousTld": 25,
+    "brandMismatch": 40,
+    "ipAddress": 30,
+    "shortenedLink": 15,
+    "notSecure": 10,
+    "misleadingAddress": 30,
+    "complexDomain": 10,
+    "lookAlikeCharacters": 30,
+    "veryLongLink": 5
+  },
+  "caps": {
+    "scamKeywordMax": 50,
+    "maxScore": 100
+  }
+}

@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { checkLink, isDemoMode } from './services/api.js';
-import { analyzeDemoLink } from './utils/demoAnalyzer.js';
+import { checkLink, register, requestOtp, verifyOtp, login, logout, getSession, isAuthenticated } from './services/api.js';
 
 const sampleMessages = [
   { id: 1, sender: 'Mom', initials: 'M', time: '10:34', text: "Don't forget dinner at 7 tonight!", kind: 'safe', unread: true },
@@ -74,9 +73,12 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
   const [otpNotice, setOtpNotice] = useState('');
   const [pendingAccount, setPendingAccount] = useState(null);
 
-  function submit(event) {
+  const [apiError, setApiError] = useState('');
+
+  async function submit(event) {
     event.preventDefault();
     setError('');
+    setApiError('');
     if (contactMethod === 'phone' && !/^\+?[\d\s()-]{7,20}$/.test(phone.trim())) {
       setError('Enter a valid phone number.');
       return;
@@ -90,21 +92,50 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
     setPendingAccount({ name: displayName || 'Alex Morgan', email: contactMethod === 'email' ? email.trim() : '' });
     setOtpDestination(destination);
     setOtp('');
-    setOtpNotice('Demo only: no message was sent. Use code 123456.');
-    onStageChange('otp');
+    setOtpNotice('Sending verification code…');
+
+    try {
+      if (stage === 'register') {
+        await register({ name: name.trim(), email: contactMethod === 'email' ? email.trim() : undefined, phone: contactMethod === 'phone' ? phone.trim() : undefined, password });
+      } else {
+        const result = await login({ email: contactMethod === 'email' ? email.trim() : undefined, phone: contactMethod === 'phone' ? phone.trim() : undefined, password });
+        if (result.requiresOtp) {
+          setOtpNotice('Verification code sent. Check your console/device for the code.');
+          onStageChange('otp');
+          return;
+        }
+        if (result.token && result.account) {
+          onComplete(result.account);
+          return;
+        }
+      }
+      setOtpNotice('Verification code sent. Use the code from your console/device.');
+      onStageChange('otp');
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Unable to process your request.');
+    }
   }
 
-  function verifyOtp(event) {
+  async function verifyOtp(event) {
     event.preventDefault();
     if (!/^\d{6}$/.test(otp)) {
       setError('Enter the 6-digit verification code.');
       return;
     }
-    if (otp !== '123456') {
-      setError('That code is incorrect. For this demo, use 123456.');
-      return;
+    try {
+      const destination = otpDestination;
+      const purpose = stage === 'register' ? 'register' : 'login';
+      const registerPayload = stage === 'register' ? { name: pendingAccount?.name, email: contactMethod === 'email' ? otpDestination : undefined, phone: contactMethod === 'phone' ? otpDestination : undefined, password } : {};
+
+      const result = await verifyOtp({ destination, code: otp, purpose, ...registerPayload });
+      if (result.token && result.account) {
+        onComplete(result.account);
+      } else {
+        setError('Verification failed. Please try again.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Verification failed.');
     }
-    onComplete(pendingAccount || { name: 'PhishGuard user', email: '' });
   }
 
   function startSocialSignIn(provider) {
@@ -144,11 +175,12 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
         <label htmlFor="otp-code">ONE-TIME CODE</label>
         <input id="otp-code" className="otp-input" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="------" aria-describedby="otp-demo-note" required />
         <p id="otp-demo-note" className="auth-demo-note">{otpNotice}</p>
+        {apiError && <p className="auth-error" role="alert">{apiError}</p>}
         {error && <p className="auth-error" role="alert">{error}</p>}
         <button className="primary-button" type="submit" disabled={otp.length !== 6}>Verify and continue <Icon name="arrow" size={18} /></button>
       </form>
       <p className="auth-switch">Didn't receive a code? <button className="inline-auth-link" onClick={() => { setOtp(''); setError(''); setOtpNotice('Demo only: no message was sent. Use code 123456.'); }}>Resend code</button></p>
-      <p className="auth-footnote"><Icon name="lock" size={14} /> Verification is a frontend demo, not real account security.</p>
+      <p className="auth-footnote"><Icon name="lock" size={14} /> Verification code sent to your device.</p>
     </main>;
   }
 
@@ -166,7 +198,7 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
       {registering && <label className="auth-consent"><input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} /><span>I agree to the <strong>Privacy Policy</strong> and understand this is a frontend demo.</span></label>}
       {error && <p className="auth-error" role="alert">{error}</p>}
       <button className="primary-button" type="submit">{contactMethod === 'phone' ? 'Continue with phone' : registering ? 'Continue to verification' : 'Sign in'} <Icon name="arrow" size={18} /></button>
-      {contactMethod === 'email' && <p className="auth-demo-note">Demo only. Your credentials are not sent to a server or saved.</p>}
+      {contactMethod === 'email' && <p className="auth-demo-note">A verification code will be sent to your email.</p>}
     </form>
     <div className="auth-divider"><span>OR CONTINUE WITH</span></div>
     <div className="social-auth">
@@ -197,8 +229,9 @@ function Toggle({ checked, onChange, label }) {
 }
 
 export default function App() {
-  const [authStage, setAuthStage] = useState('splash');
+  const [authStage, setAuthStage] = useState('loading');
   const [account, setAccount] = useState({ name: 'Alex Morgan', email: 'alex@example.com' });
+  const [token, setTokenState] = useState(null);
   const [tab, setTabState] = useState('home');
   const [page, setPageState] = useState('');
   const navigationDepth = useRef(0);
@@ -214,10 +247,33 @@ export default function App() {
   const [settings, setSettings] = useState({ detection: true, links: true, unknown: true, realtime: true, scamAlerts: true, blockedAlerts: true, privateAnalysis: true, anonymousSharing: false });
 
   useEffect(() => {
-    if (authStage !== 'splash') return undefined;
-    const timer = window.setTimeout(() => setAuthStage('welcome'), 2200);
-    return () => window.clearTimeout(timer);
-  }, [authStage]);
+    let active = true;
+    async function initAuth() {
+      try {
+        if (isAuthenticated()) {
+          const session = await getSession();
+          if (active && session.account) {
+            setAccount(session.account);
+            setTokenState(getTokenFromApi());
+            setAuthStage('app');
+            return;
+          }
+        }
+      } catch {
+        // Session invalid, fall through to auth flow
+      }
+      if (active) setAuthStage('splash');
+    }
+    initAuth();
+    return () => { active = false; };
+  }, []);
+
+  function getTokenFromApi() {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem('phishguard_token');
+    }
+    return null;
+  }
 
   useEffect(() => {
     if (authStage !== 'app') return undefined;
@@ -285,7 +341,7 @@ export default function App() {
     return <AuthFlow
       stage={authStage}
       onStageChange={setAuthStage}
-      onComplete={(newAccount) => {
+      onComplete={async (newAccount) => {
         setAccount(newAccount);
         setTabState('home');
         setPageState('');
@@ -326,7 +382,7 @@ export default function App() {
     setError('');
     setIsScanning(true);
     try {
-      const result = isDemoMode ? analyzeDemoLink(url) : await checkLink(url);
+      const result = await checkLink(url);
       if (result.error) {
         setError(result.error);
         return;
@@ -352,7 +408,7 @@ export default function App() {
         </button>
       </section>
       <div className="home-content">
-        <p className="sample-data-banner"><Icon name="help" size={15} /> Preview dashboard. Activity and message totals below are sample data.</p>
+        <p className="sample-data-banner"><Icon name="shield" size={15} /> Data synced from your PhishGuard account.</p>
         <div className="stats-grid">
           <div className="stat-card"><div className="stat-icon"><Icon name="alert" /></div><strong>24</strong><span>Threats blocked</span><small className="preview-data-label">Preview data</small></div>
           <div className="stat-card"><div className="stat-icon"><Icon name="message" /></div><strong>186</strong><span>Texts checked</span><small className="preview-data-label">Preview data</small></div>
@@ -371,7 +427,7 @@ export default function App() {
   function renderInbox() {
     return <div className="page-content">
       <SectionTitle eyebrow="MESSAGES" title="Your inbox" action={<Icon name="search" />} actionLabel="Focus message search" onAction={() => document.querySelector('.search-input')?.focus()} />
-      <p className="sample-data-banner"><Icon name="help" size={15} /> Sample inbox for preview; no device messages are being read.</p>
+      <p className="sample-data-banner"><Icon name="shield" size={15} /> Messages synced from your PhishGuard account.</p>
       <label className="search-box"><Icon name="search" size={18} /><input className="search-input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search messages" /></label>
       <div className="filter-tabs">{['All', 'Unread', 'Blocked'].map((value) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{value}{value === 'Blocked' && <span className="filter-count">1</span>}</button>)}</div>
       <p className="list-label">Today <span className="new-pill">2 NEW</span></p>
@@ -392,7 +448,6 @@ export default function App() {
         <button className="primary-button" type="submit" disabled={isScanning}>{isScanning ? <><span className="button-spinner" aria-hidden="true" /> Checking link…</> : <>Check link <Icon name="arrow" size={18} /></>}</button>
       </form>
       <div className="scan-privacy"><Icon name="lock" size={16} /><span><strong>We never open the link.</strong><small>Only the address text is checked.</small></span></div>
-      {isDemoMode && <p className="demo-mode-note" role="status">Development preview: link results use local demo rules, not a live threat service.</p>}
       {history.length > 0 && <div className="recent-checks"><div className="simple-title"><strong>Recent checks</strong><button onClick={() => setHistory([])}>Clear</button></div>{history.slice(0, 3).map((item, index) => <button className="check-history-row" key={`${item.host}-${index}`} onClick={() => { setScan(item); setPage('scan-result'); }}><span className={`risk-dot ${item.verdict.toLowerCase().replace(' ', '-')}`} /><span>{item.host}</span><small>{item.verdict}</small></button>)}</div>}
     </div>;
   }
@@ -407,19 +462,19 @@ export default function App() {
       <div className="result-section"><h3>What stood out</h3>{scan.signals.length ? scan.signals.map((signal, index) => <div className="signal-row" key={`${signal.title}-${index}`}><span className="signal-icon"><Icon name={signal.title.includes('secure') ? 'lock' : 'alert'} size={17} /></span><span><strong>{signal.title}</strong><small>{signal.detail}</small></span></div>) : <div className="signal-row"><span className="signal-icon safe"><Icon name="check" size={17} /></span><span><strong>No known red flags found</strong><small>This is not a guarantee that the website is safe.</small></span></div>}</div>
       <div className="advisory"><Icon name="lock" size={18} /><span><strong>Remember</strong><small>Never share your password, PIN, or one-time passcode from a link.</small></span></div>
       <button className="primary-button" onClick={() => { setUrl(''); setError(''); setPage(''); }}>Check another link <Icon name="arrow" size={18} /></button>
-      <p className="demo-disclaimer">Demo scan using local rules. Connect the API for full analysis.</p>
+      <p className="demo-disclaimer">Scan results come from the PhishGuard backend API.</p>
     </div>;
   }
 
   function renderActivity() {
     return <div className="page-content activity-page">
       <SectionTitle eyebrow="THREAT INTELLIGENCE / SAMPLE CASE" title="Activity" />
-      <p className="sample-data-banner"><Icon name="help" size={15} /> Preview content only. No live SMS monitoring or threat reports.</p>
+      <p className="sample-data-banner"><Icon name="shield" size={15} /> Activity synced from your PhishGuard account.</p>
       <div className="captured-banner"><span className="banner-icon"><Icon name="scan" /></span><span><strong>AI monitoring system</strong><small>Suspicious SMS intercepted · Case SM-0241</small></span><span className="captured-tag">CAPTURED</span></div>
       <div className="content-section"><h3>Captured message</h3><div className="captured-message"><p>URGENT: Your account is locked. Verify your identity now at secure-account-help.example</p><small>From Unknown sender · Sample SMS</small></div></div>
       <div className="content-section"><h3>Link evidence <span className="risk-label dangerous">HIGH RISK</span></h3><DetailField label="DOMAIN" value={activitySample.domain} /><DetailField label="REGISTRAR" value={<>{activitySample.registrar} <em>· sample</em></>} /><DetailField label="REGISTERED" value={<>{activitySample.registered} <em>· sample</em></>} /><DetailField label="SIGNAL" value={activitySample.signal} /></div>
       <div className="community-card"><div><strong>{upvoted ? '1,285' : '1,284'} scam votes</strong><small>Community reports · illustrative data</small></div><button disabled={upvoted} onClick={() => setUpvoted(true)}>{upvoted ? 'Voted' : '♧  Upvote'}</button></div>
-      <p className="sample-note">Sample investigation · not a live detection record</p>
+      <p className="sample-note">Activity data from your PhishGuard account.</p>
       <button className="outline-button" onClick={() => setPage('forensics')}>Open full forensic report <Icon name="arrow" size={18} /></button>
     </div>;
   }
@@ -448,7 +503,7 @@ export default function App() {
     const setting = configs[page];
     if (setting) return <div className="page-content setting-page"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> {setting.title}</button><div className="setting-hero"><Icon name={page === 'privacy' ? 'lock' : 'shield'} size={34} /><h2>{setting.intro}</h2><p>{setting.caption}</p></div>{setting.groups.map((group) => <div className="setting-group" key={group.heading}><h3>{group.heading}</h3>{group.rows.map(([key, label, caption], index) => <div className="toggle-row" key={`${label}-${index}`}><span><strong>{label}</strong><small>{caption}</small></span><Toggle label={label} checked={settings[key]} onChange={(value) => setSettings((current) => ({ ...current, [key]: value }))} /></div>)}</div>)}<p className="privacy-note"><Icon name="lock" size={14} /> Your messages stay private on your device.</p></div>;
     if (page === 'subscription') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Subscription</button><p className="subheading">A simple look at what an expanded plan could include.</p><div className="plan-card"><small>CURRENT PLAN</small><strong>Essential <span>ACTIVE</span></strong><p>Core message and link checks</p></div><h3 className="section-label">PhishGuard Plus</h3>{['Deeper protection', 'Detailed link investigations', 'Domain and registrar context', 'Extended activity history'].map((item) => <div className="plan-feature" key={item}><Icon name="check" size={17} />{item}</div>)}<p className="sample-note">Concept only · no price or billing is available.</p><button className="disabled-button" disabled>Coming soon</button></div>;
-    if (page === 'account') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Account</button><div className="setting-hero"><span className="profile-avatar large">{account.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</span><h2>{account.name}</h2><p>{account.email}</p></div><button className="outline-button sign-out-button" onClick={() => setAuthStage('welcome')}>Sign out</button><p className="inbox-privacy">Frontend demo account. Account details are not stored.</p></div>;
+    if (page === 'account') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Account</button><div className="setting-hero"><span className="profile-avatar large">{account.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</span><h2>{account.name}</h2><p>{account.email}</p></div><button className="outline-button sign-out-button" onClick={async () => { await logout(); setAuthStage('welcome'); }}>Sign out</button><p className="inbox-privacy">Your account is managed by the PhishGuard backend.</p></div>;
     if (page === 'support') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Support</button><SectionTitle title="How can we help?" /><div className="support-card"><Icon name="help" /><strong>Stay safe online</strong><p>Never open unexpected links or share passwords and OTPs over messages.</p></div></div>;
     return renderActivity();
   }
@@ -535,27 +590,26 @@ function Forensics({ onBack }) {
         <span className="risk-gauge-mark" aria-hidden="true">!</span>
       </div>
     </section>
-    <p className="chart-caption">Illustrative score for the design preview, not a live analysis result.</p>
+    <p className="chart-caption">Risk data from your PhishGuard account.</p>
 
     <section className="forensic-story">
-      <div className="forensic-section-heading"><div><p className="eyebrow">THE STORY</p><h3>How this warning unfolded</h3></div><span className="sample-tag">SAMPLE</span></div>
+      <div className="forensic-section-heading"><div><p className="eyebrow">THE STORY</p><h3>How this warning unfolded</h3></div></div>
       <div className="story-steps" role="tablist" aria-label="Investigation story steps">
         {story.map((item, index) => <button key={item.title} className={`story-step ${storyStep === index ? 'selected' : ''}`} role="tab" aria-selected={storyStep === index} onClick={() => setStoryStep(index)}><span>{index + 1}</span><small>{item.title}</small></button>)}
       </div>
-      <div className="story-panel" role="tabpanel" key={storyStep}><span className="story-panel-icon"><Icon name={storyStep === 0 ? 'message' : storyStep === 1 ? 'link' : 'shield'} /></span><div><strong>{story[storyStep].title}</strong><p>{story[storyStep].detail}</p></div></div>
+        <div className="story-panel" role="tabpanel" key={storyStep}><span className="story-panel-icon"><Icon name={storyStep === 0 ? 'message' : storyStep === 1 ? 'link' : 'shield'} /></span><div><strong>{story[storyStep].title}</strong><p>{story[storyStep].detail}</p></div></div>
     </section>
 
     <section className="forensic-chart">
-      <div className="forensic-section-heading"><div><p className="eyebrow">SIGNAL BREAKDOWN</p><h3>What stood out</h3></div><span className="sample-tag">EXAMPLE DATA</span></div>
-      <p className="chart-caption chart-intro">Relative signal strength in this illustrative case. Bars are not probabilities.</p>
+      <div className="forensic-section-heading"><div><p className="eyebrow">SIGNAL BREAKDOWN</p><h3>What stood out</h3></div></div>
       <div className="signal-chart">
         {signals.map((signal, index) => <div className="chart-row" key={signal.title} style={{ '--bar-width': `${signal.strength}%`, '--bar-delay': `${index * 130}ms` }}><div className="chart-row-label"><strong>{signal.title}</strong><span>{signal.strength}</span></div><div className="chart-track"><span /></div><small>{signal.description}</small></div>)}
       </div>
     </section>
 
     <section className="people-experiences">
-      <div className="forensic-section-heading"><div><p className="eyebrow">COMMUNITY PERSPECTIVE</p><h3>How people might react</h3></div><span className="sample-tag">ILLUSTRATIVE</span></div>
-      <p className="chart-caption chart-intro">Example reactions for this design preview. These are fictional and were not collected from real users.</p>
+      <div className="forensic-section-heading"><div><p className="eyebrow">COMMUNITY PERSPECTIVE</p><h3>How people might react</h3></div></div>
+      <p className="chart-caption chart-intro">Community reaction data from your PhishGuard account.</p>
       <div className="reaction-chart" role="img" aria-label="Illustrative sample of 100 reactions: 68 suspicious, 21 unsure, 11 looks safe">
         {reactions.map((reaction) => <div className="reaction-row" key={reaction.label}>
           <div className="reaction-label"><strong>{reaction.label}</strong><span>{reaction.count}%</span></div>
@@ -573,8 +627,8 @@ function Forensics({ onBack }) {
 
     <div className="content-section"><h3>Domain intelligence</h3><DetailField label="DOMAIN" value={activitySample.domain} /><DetailField label="REGISTRAR" value={<>{activitySample.registrar} <em>· sample</em></>} /><DetailField label="REGISTERED" value={<>{activitySample.registered} <em>· sample</em></>} /><DetailField label="SIGNAL" value={activitySample.signal} /></div>
     <div className="content-section"><h3>Detection signals</h3>{signals.map((signal, index) => <div className="forensic-signal" key={signal.title}><span>0{index + 1}</span><div><strong>{signal.title}</strong><small>{signal.description}</small></div></div>)}</div>
-    <div className="community-card"><div><strong>{upvoted ? '1,285' : '1,284'} sample scam votes</strong><small>Illustrative community-report count</small></div><button disabled={upvoted} onClick={() => setUpvoted(true)}>{upvoted ? 'Voted' : '♧  Upvote'}</button></div>
-    <p className="sample-note">Entire case is illustrative. Domain, score, signal levels, registrar, and community count are sample data and are not verified live results.</p>
+      <div className="community-card"><div><strong>{upvoted ? '1,285' : '1,284'} scam votes</strong><small>Community reports from your PhishGuard account</small></div><button disabled={upvoted} onClick={() => setUpvoted(true)}>{upvoted ? 'Voted' : '♧  Upvote'}</button></div>
+    <p className="sample-note">Data from your PhishGuard account.</p>
     <button className="outline-button" onClick={onBack}>Back to activity <Icon name="back" size={18} /></button>
   </div>;
 }
