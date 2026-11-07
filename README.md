@@ -47,7 +47,7 @@ Copy `frontend/.env.example` to `.env.local`, set `VITE_API_URL` to the HTTPS UR
 
 ## Quick start (backend)
 
-The Express backend is a planned scaffold area; its API contract, environment variables, and reference implementation are documented in [`backend/README.md`](backend/README.md). The full backend design — module structure, SQLite schema, and user workflows — is in [`BACKEND_DESIGN.md`](BACKEND_DESIGN.md). Deployment steps (PM2, Cloudflare Tunnel, Arch Linux VPS) live in [`deployment/README.md`](deployment/README.md).
+The Express backend foundation (M0–M1) is implemented: startup/configuration, SQLite migrations, a health endpoint, URL normalization/persistence, and verdict bands. Setup and the locked API contract are documented in [`backend/README.md`](backend/README.md). The full backend design — module structure, SQLite schema, and user workflows — is in [`BACKEND_DESIGN.md`](BACKEND_DESIGN.md). Link analysis, authentication, and real-time alert routes remain planned. Deployment steps (PM2, Cloudflare Tunnel, Arch Linux VPS) live in [`deployment/README.md`](deployment/README.md).
 
 ## Android build
 
@@ -63,7 +63,7 @@ npm run android:release  # build + cap sync + assembleRelease
 |---|---|
 | React frontend (screens, demo analyzer) | ✅ Working demo |
 | Android scaffold (Capacitor) | ✅ Scaffolded; native SMS receiver pending |
-| Express backend | 🚧 Planned (see `backend/README.md`) |
+| Express backend | 🟡 M0–M1 implemented; link analysis, auth, and alerts planned |
 | Deployment configs | 🚧 Sample templates provided |
 | Auth / OTP flows | Prototype UI only — no real authentication yet |
 

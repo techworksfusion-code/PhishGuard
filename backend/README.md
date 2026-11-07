@@ -1,6 +1,10 @@
 # PhishGuard API (backend)
 
-> **Status: planned scaffold.** The `src/` folders are placeholders. This document is the authoritative contract the server must implement, matching `System_Design.md` §7. The React demo analyzer mirrors these rules client-side until the API is deployed.
+> **Status: M0–M1 implemented.** The API bootstrap, SQLite migrations, health
+> endpoint, URL normalization/persistence, and verdict bands are implemented.
+> Link analysis, authentication, and real-time alert routes remain planned.
+> This document is the authoritative API contract, matching `System_Design.md`
+> §7.
 
 Module structure, database schema, and user workflows: [`../BACKEND_DESIGN.md`](../BACKEND_DESIGN.md).
 
@@ -8,9 +12,9 @@ Module structure, database schema, and user workflows: [`../BACKEND_DESIGN.md`](
 
 - Node.js + Express (PM2-managed) on port **5000**
 - SQLite via `better-sqlite3` — schema in [`../BACKEND_DESIGN.md`](../BACKEND_DESIGN.md) §2, ready-to-run migrations in [`db/migrations/`](db/migrations/)
-- `cors`, `express-rate-limit` (30 requests/minute per IP), `dotenv`
-- Google Gemini Flash via `@google/genai`
-- Rule engine module `src/analyzer.js` fed by `src/rules.json` (scam keywords, suspicious TLDs, shorteners, brand domains — keep lists here, not hard-coded)
+- `cors`, `express-rate-limit` (30 requests/minute per IP), `dotenv`, `helmet`
+- Planned for M2: Google Gemini Flash via `@google/genai` and the rule engine in
+  `src/analyzer.js` fed by `src/rules.json`
 
 ## Environment variables
 
@@ -27,6 +31,21 @@ Copy `.env.example` (create it locally — real credentials are never committed)
 | `GEMINI_DAILY_MAX` | Per-day Gemini call ceiling; over-cap falls back to rules with `"ai": "unavailable"` |
 | `OTP_CHANNEL` | `console` (dev) \| `smtp` \| `telegram` \| `whatsapp` (Baileys — chosen production channel for the lab) |
 | `WHATSAPP_SESSION_DIR` | Directory holding the paired Baileys session keys (gitignored, backed up once) |
+
+Create `backend/.env` from [`.env.example`](.env.example), set
+`GEMINI_API_KEY`, then run:
+
+```powershell
+npm ci
+npm test
+npm start
+```
+
+The API listens on port 5000 by default. `GET /api/health` returns
+`{ "ok": true }`. Configure `CORS_ORIGINS` as a comma-separated list of exact
+HTTP(S) origins for the frontend (for example
+`http://localhost:5173,https://localhost`). Database migrations are applied
+automatically at startup; `npm run migrate` can apply them separately.
 
 ## API
 
@@ -94,6 +113,6 @@ Returns the last 20 results from the in-memory threat history (current session o
 ## Roadmap
 
 1. Implement `analyzer.js` + `rules.json` (reference pseudocode in `System_Design.md` §5)
-2. Implement `server.js`, `app.js` and the routes listed above
+2. Implement `POST /api/check-link`, `GET /api/history`, and Gemini integration (M2)
 3. Add tests in `tests/` covering every rule in §5 and the score-band boundaries
 4. Deploy per [`../deployment/README.md`](../deployment/README.md)

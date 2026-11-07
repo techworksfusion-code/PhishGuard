@@ -36,9 +36,9 @@ router.post('/register', asyncHandler(async (req, res) => {
   const destination = email || phone;
   const channel = process.env.OTP_CHANNEL || 'console';
   const { code } = issueOtp({ destination, purpose: 'register' });
-  await sendOtp({ destination, code, channel, purpose: 'register' });
+  const otpResult = await sendOtp({ destination, code, channel, purpose: 'register' });
 
-  res.json({ requiresOtp: true, destination, channel });
+  res.json({ requiresOtp: true, destination, channel, code: otpResult.code });
 }));
 
 // POST /api/auth/otp/request — request a new OTP code
@@ -51,9 +51,9 @@ router.post('/otp/request', asyncHandler(async (req, res) => {
 
   const channel = process.env.OTP_CHANNEL || 'console';
   const { code } = issueOtp({ destination, purpose });
-  await sendOtp({ destination, code, channel, purpose });
+  const otpResult = await sendOtp({ destination, code, channel, purpose });
 
-  res.json({ sent: true, channel, destination });
+  res.json({ sent: true, channel, destination, code: otpResult.code });
 }));
 
 // POST /api/auth/otp/verify — verify OTP code, create session
@@ -106,9 +106,9 @@ router.post('/login', asyncHandler(async (req, res) => {
   const destination = email || phone;
   const channel = process.env.OTP_CHANNEL || 'console';
   const { code } = issueOtp({ destination, purpose: 'login' });
-  await sendOtp({ destination, code, channel, purpose: 'login' });
+  const otpResult = await sendOtp({ destination, code, channel, purpose: 'login' });
 
-  res.json({ requiresOtp: true, destination, channel });
+  res.json({ requiresOtp: true, destination, channel, code: otpResult.code });
 }));
 
 // GET /api/auth/session — requires auth
