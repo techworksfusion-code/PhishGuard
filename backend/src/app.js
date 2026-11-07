@@ -19,7 +19,11 @@ function createApp() {
 
   app.use(requestLogger);
   app.use(helmet({ crossOriginResourcePolicy: false }));
-  app.use(cors({ origin: process.env.VITE_API_URL || '*' }));
+  const allowedOrigins = [
+    'https://guard.fusiontechworks.in',
+    'http://localhost:5173', // local dev
+  ];
+  app.use(cors({ origin: allowedOrigins }));
   app.use(express.json({ limit: '10kb' }));
   app.use(rateLimit({ windowMs: 60 * 1000, max: 30, message: { error: 'Too many requests. Try again later.' } }));
   app.use('/api/auth', authRateLimiter);

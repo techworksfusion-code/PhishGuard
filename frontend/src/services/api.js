@@ -27,10 +27,6 @@ function authHeaders() {
 }
 
 async function apiRequest(path, options = {}) {
-  if (!API_BASE_URL) {
-    throw new Error('API not configured. Set VITE_API_URL to your PhishGuard backend address.');
-  }
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
 

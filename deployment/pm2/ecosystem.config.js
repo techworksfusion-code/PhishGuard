@@ -1,6 +1,6 @@
-// PM2 process file for the PhishGuard Express API (sample).
-// Start with: pm2 start ecosystem.config.js
-// Persist after reboot: pm2 save && pm2 startup
+// PM2 process file for PhishGuard on this machine (served through Cloudflare Tunnel).
+// Start with: pm2 start ecosystem.config.js && pm2 save
+// Persist across reboot:  pm2-startup install (via pm2-windows-startup)
 
 module.exports = {
   apps: [
@@ -10,11 +10,21 @@ module.exports = {
       cwd: __dirname + '/../../backend',
       instances: 1,
       autorestart: true,
-      max_memory_restart: '200M',
+      max_memory_restart: '300M',
       env: {
         NODE_ENV: 'production',
         PORT: 5000
-        // GEMINI_API_KEY and GEMINI_MODEL are read from backend/.env
+      }
+    },
+    {
+      name: 'phishguard-web',
+      // Static server for the production build (frontend/dist).
+      script: 'server.cjs',
+      cwd: __dirname + '/../../frontend',
+      instances: 1,
+      autorestart: true,
+      env: {
+        WEB_PORT: 8080
       }
     }
   ]
