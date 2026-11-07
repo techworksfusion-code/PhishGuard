@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { checkLink, register, requestOtp, verifyOtp, login, logout, getSession, isAuthenticated } from './services/api.js';
+import { checkLink, register, requestOtp, verifyOtp as verifyOtpApi, login, logout, getSession, isAuthenticated } from './services/api.js';
 
 const sampleMessages = [
   { id: 1, sender: 'Mom', initials: 'M', time: '10:34', text: "Don't forget dinner at 7 tonight!", kind: 'safe', unread: true },
@@ -75,6 +75,8 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
 
   const [apiError, setApiError] = useState('');
 
+  const [otpCode, setOtpCode] = useState('');
+
   async function submit(event) {
     event.preventDefault();
     setError('');
@@ -92,15 +94,18 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
     setPendingAccount({ name: displayName || 'Alex Morgan', email: contactMethod === 'email' ? email.trim() : '' });
     setOtpDestination(destination);
     setOtp('');
+    setOtpCode('');
     setOtpNotice('Sending verification code…');
 
     try {
+      let otpResult;
       if (stage === 'register') {
-        await register({ name: name.trim(), email: contactMethod === 'email' ? email.trim() : undefined, phone: contactMethod === 'phone' ? phone.trim() : undefined, password });
+        otpResult = await register({ name: name.trim(), email: contactMethod === 'email' ? email.trim() : undefined, phone: contactMethod === 'phone' ? phone.trim() : undefined, password });
       } else {
         const result = await login({ email: contactMethod === 'email' ? email.trim() : undefined, phone: contactMethod === 'phone' ? phone.trim() : undefined, password });
         if (result.requiresOtp) {
-          setOtpNotice('Verification code sent. Check your console/device for the code.');
+          setOtpNotice('Verification code sent.');
+          if (result.code) setOtpCode(result.code);
           onStageChange('otp');
           return;
         }
@@ -109,7 +114,9 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
           return;
         }
       }
-      setOtpNotice('Verification code sent. Use the code from your console/device.');
+      setOtpNotice('Verification code sent.');
+      if (otpResult.code) setOtpCode(otpResult.code);
+      onStageChange('otp');
       onStageChange('otp');
     } catch (err) {
       setApiError(err instanceof Error ? err.message : 'Unable to process your request.');
@@ -127,7 +134,7 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
       const purpose = stage === 'register' ? 'register' : 'login';
       const registerPayload = stage === 'register' ? { name: pendingAccount?.name, email: contactMethod === 'email' ? otpDestination : undefined, phone: contactMethod === 'phone' ? otpDestination : undefined, password } : {};
 
-      const result = await verifyOtp({ destination, code: otp, purpose, ...registerPayload });
+      const result = await verifyOtpApi({ destination, code: otp, purpose, ...registerPayload });
       if (result.token && result.account) {
         onComplete(result.account);
       } else {
@@ -175,12 +182,13 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
         <label htmlFor="otp-code">ONE-TIME CODE</label>
         <input id="otp-code" className="otp-input" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="------" aria-describedby="otp-demo-note" required />
         <p id="otp-demo-note" className="auth-demo-note">{otpNotice}</p>
+        {otpCode && <p className="auth-demo-note"><strong>Code (dev mode): {otpCode}</strong></p>}
         {apiError && <p className="auth-error" role="alert">{apiError}</p>}
         {error && <p className="auth-error" role="alert">{error}</p>}
         <button className="primary-button" type="submit" disabled={otp.length !== 6}>Verify and continue <Icon name="arrow" size={18} /></button>
       </form>
-      <p className="auth-switch">Didn't receive a code? <button className="inline-auth-link" onClick={() => { setOtp(''); setError(''); setOtpNotice('Demo only: no message was sent. Use code 123456.'); }}>Resend code</button></p>
-      <p className="auth-footnote"><Icon name="lock" size={14} /> Verification code sent to your device.</p>
+      <p className="auth-switch">Didn't receive a code? <button className="inline-auth-link" onClick={() => { setOtp(''); setError(''); setOtpNotice('Resending code…'); }}>Resend code</button></p>
+      <p className="auth-footnote"><Icon name="lock" size={14} /> {otpCode ? 'Code shown above (dev mode)' : 'Verification code sent to your device.'}</p>
     </main>;
   }
 
