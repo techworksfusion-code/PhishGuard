@@ -33,10 +33,26 @@ function markApplied(version) {
 
 function applyFile(filePath) {
   const sql = fs.readFileSync(filePath, 'utf8');
-  const transaction = db.transaction(() => {
-    db.exec(sql);
-  });
-  transaction();
+
+  // Some migrations (e.g. 004_google_auth.sql) must temporarily disable FK
+  // enforcement to rebuild a table. Enforcement is restored right after,
+  // and the whole file is applied atomically; integrity is verified below.
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.exec(`BEGIN;
+${sql}
+COMMIT;`);
+  } catch (err) {
+    try { db.exec('ROLLBACK;'); } catch { /* already rolled back */ }
+    throw err;
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+
+  const violations = db.prepare('PRAGMA foreign_key_check').all();
+  if (violations.length > 0) {
+    throw new Error(`Migration ${path.basename(filePath)} left FK violations: ${JSON.stringify(violations)}`);
+  }
 }
 
 function migrate() {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { checkLink, register, requestOtp, verifyOtp as verifyOtpApi, login, logout, getSession, isAuthenticated } from './services/api.js';
+import { checkLink, register, requestOtp, verifyOtp as verifyOtpApi, login, logout, getSession, isAuthenticated, getGoogleAuthUrl, exchangeGoogleCode } from './services/api.js';
 
 const sampleMessages = [
   { id: 1, sender: 'Mom', initials: 'M', time: '10:34', text: "Don't forget dinner at 7 tonight!", kind: 'safe', unread: true },
@@ -59,7 +59,7 @@ function Brand({ compact = false }) {
   return <div className="brand"><span className="brand-mark"><Icon name="shield" size={18} /></span>{!compact && <span>PhishGuard<span className="brand-dot">.</span></span>}</div>;
 }
 
-function AuthFlow({ stage, onStageChange, onComplete }) {
+function AuthFlow({ stage, onStageChange, onComplete, initialProviderMessage = '' }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -67,7 +67,7 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
   const [password, setPassword] = useState('');
   const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState('');
-  const [providerMessage, setProviderMessage] = useState('');
+  const [providerMessage, setProviderMessage] = useState(initialProviderMessage);
   const [otp, setOtp] = useState('');
   const [otpDestination, setOtpDestination] = useState('');
   const [otpNotice, setOtpNotice] = useState('');
@@ -148,7 +148,28 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
   }
 
   function startSocialSignIn(provider) {
-    setProviderMessage(`${provider} sign-in needs OAuth configuration. Connect the provider in the backend, or use email/phone demo verification below.`);
+    if (provider !== 'Google') {
+      setProviderMessage(`${provider} sign-in is not available yet. Use email/phone verification below.`);
+      return;
+    }
+
+    setProviderMessage('Opening Google sign-in…');
+    getGoogleAuthUrl()
+      .then(({ url, state }) => {
+        try {
+          sessionStorage.setItem('phishguard_oauth_state', state);
+        } catch {
+          // Session storage unavailable — the backend still verifies the code itself.
+        }
+        window.location.assign(url);
+      })
+      .catch((err) => {
+        setProviderMessage(
+          err?.status === 503 || /not configured/i.test(err?.message || '')
+            ? 'Google sign-in needs OAuth configuration. Connect the provider in the backend, or use email/phone demo verification below.'
+            : (err?.message || 'Could not start Google sign-in. Try again or use email below.')
+        );
+      });
   }
 
   if (stage === 'splash') {
@@ -255,6 +276,44 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [upvoted, setUpvoted] = useState(false);
   const [settings, setSettings] = useState({ detection: true, links: true, unknown: true, realtime: true, scamAlerts: true, blockedAlerts: true, privateAnalysis: true, anonymousSharing: false });
+  const [googleAuthError, setGoogleAuthError] = useState('');
+
+  // "Continue with Google" returns to /auth/google/callback?code=…&state=…
+  // Finish the sign-in before anything else is shown.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+
+    if (window.location.pathname !== '/auth/google/callback' || !code) {
+      return undefined;
+    }
+
+    let active = true;
+    (async () => {
+      window.history.replaceState(null, '', '/');
+      try {
+        const storedState = sessionStorage.getItem('phishguard_oauth_state');
+        sessionStorage.removeItem('phishguard_oauth_state');
+        if (storedState && state && storedState !== state) {
+          throw new Error('Sign-in expired. Please try again.');
+        }
+        const payload = await exchangeGoogleCode(code);
+        if (active && payload.account) {
+          setAccount(payload.account);
+          setAuthStage('app');
+        } else if (active) {
+          setAuthStage('splash');
+        }
+      } catch (err) {
+        if (active) {
+          setGoogleAuthError(err?.message || 'Google sign-in failed. Try email sign-in below.');
+          setAuthStage('welcome');
+        }
+      }
+    })();
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -351,6 +410,7 @@ export default function App() {
     return <AuthFlow
       stage={authStage}
       onStageChange={setAuthStage}
+      initialProviderMessage={googleAuthError && authStage === 'welcome' ? googleAuthError : ''}
       onComplete={async (newAccount) => {
         setAccount(newAccount);
         setTabState('home');

@@ -30,6 +30,8 @@ Copy `.env.example` (create it locally — real credentials are never committed)
 | `SCAN_RATE_PER_TOKEN` | Per-token rate cap on `/api/scan-message`; defaults to `20` |
 | `GEMINI_DAILY_MAX` | Per-day Gemini call ceiling; over-cap falls back to rules with `"ai": "unavailable"` |
 | `OTP_CHANNEL` | `console` (dev) \| `smtp` \| `telegram` \| `whatsapp` (Baileys — chosen production channel for the lab) |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Enable **Continue with Google** (OAuth web client). Optional; absent → `/api/auth/google/url` returns `503` and the frontend falls back to email/phone |
+| `GOOGLE_REDIRECT_URI` | Must match the OAuth client's redirect URI; default `http://localhost:5173/auth/google/callback` |
 | `SMTP_HOST` / `SMTP_PORT` | SMTP server for the `smtp` channel; defaults `smtp.gmail.com:465`. Only needed when `OTP_CHANNEL=smtp` |
 | `SMTP_USER` / `SMTP_PASS` | Gmail address / **16-character App Password** (Google Account → Security → 2-Step Verification → App passwords). Regular account passwords are rejected by Gmail |
 | `SMTP_FROM` | Optional custom From line, e.g. `PhishGuard OTP <you@gmail.com>` |

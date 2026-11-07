@@ -46,6 +46,42 @@ function findUserByEmail(email) {
   return db.prepare('SELECT id, name, email, phone, password_hash, history_sync FROM users WHERE email = ? AND deleted_at IS NULL').get(email);
 }
 
+function findUserByGoogleSub(googleSub) {
+  return db.prepare('SELECT id, name, email, phone, history_sync FROM users WHERE google_sub = ? AND deleted_at IS NULL').get(googleSub);
+}
+
+// Sign-in / account-provisioning for Google accounts:
+//  - existing Google-linked user            → return as-is (update last_login_at)
+//  - existing email/password account       → LINK the Google sub to the same row
+//  - brand-new Google email                → create a password-less account
+function upsertGoogleUser({ googleSub, email, name }) {
+  const now = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
+
+  let user = findUserByGoogleSub(googleSub);
+  if (user) {
+    db.prepare(`UPDATE users SET last_login_at = ${now} WHERE id = ?`).run(user.id);
+    return { user, linked: false };
+  }
+
+  const byEmail = db.prepare('SELECT id, password_hash FROM users WHERE email = ? AND deleted_at IS NULL').get(email);
+  if (byEmail) {
+    db.prepare(
+      `UPDATE users
+          SET google_sub = ?,
+              auth_provider = CASE WHEN password_hash IS NOT NULL THEN 'password+google' ELSE 'google' END,
+              last_login_at = ${now}
+        WHERE id = ?`
+    ).run(googleSub, byEmail.id);
+    return { user: getUserById(byEmail.id), linked: true };
+  }
+
+  const info = db.prepare(
+    `INSERT INTO users (name, email, google_sub, auth_provider, history_sync) VALUES (?, ?, ?, 'google', FALSE)`
+  ).run(name, email, googleSub);
+
+  return { user: getUserById(info.lastInsertRowid), linked: false };
+}
+
 function findUserByPhone(phone) {
   return db.prepare('SELECT id, name, email, phone, password_hash, history_sync FROM users WHERE phone = ? AND deleted_at IS NULL').get(phone);
 }
@@ -123,6 +159,8 @@ module.exports = {
   createUser,
   getUserById,
   findUserByEmail,
+  findUserByGoogleSub,
+  upsertGoogleUser,
   findUserByPhone,
   verifyLogin,
   hashPassword,

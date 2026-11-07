@@ -10,12 +10,39 @@ const {
   verifyLogin,
   issueOtp,
   verifyOtp,
+  upsertGoogleUser,
 } = require('../services/auth.service');
+const googleService = require('../services/google.service');
 const { createSession, revokeSession } = require('../services/token.service');
 const { sendOtp } = require('../services/delivery.service');
 const { db } = require('../db');
 
 const router = Router();
+
+// GET /api/auth/google/url — authorization redirect URL for "Continue with Google"
+router.get('/google/url', (req, res) => {
+  if (!googleService.isConfigured()) {
+    return res.status(503).json({
+      error: 'Google sign-in is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend/.env.',
+    });
+  }
+  const { url, state } = googleService.buildAuthUrl();
+  res.json({ url, state });
+});
+
+// POST /api/auth/google/callback — exchange code, provision/link user, issue session
+router.post('/google/callback', asyncHandler(async (req, res) => {
+  const { code } = req.body || {};
+
+  const { sub, email, name } = await googleService.verifyGoogleCode(code);
+  const { user } = upsertGoogleUser({ googleSub: sub, email, name });
+  const { token } = createSession({ userId: user.id, userAgent: req.get('User-Agent') });
+
+  res.json({
+    token,
+    account: { id: user.id, name: user.name, email: user.email, phone: user.phone },
+  });
+}));
 
 // POST /api/auth/register — validate + create user + issue OTP (no session yet)
 router.post('/register', asyncHandler(async (req, res) => {

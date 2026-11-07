@@ -158,6 +158,24 @@ export async function login({ email, phone, password }) {
   return payload; // { token, account } or { requiresOtp: true, destination, channel }
 }
 
+// ---------- Google sign-in ----------
+
+export async function getGoogleAuthUrl() {
+  const payload = await apiRequest('/api/auth/google/url', { method: 'GET' });
+  return payload; // { url, state } — caller navigates to url
+}
+
+export async function exchangeGoogleCode(code) {
+  const payload = await apiRequest('/api/auth/google/callback', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+  if (payload.token) {
+    setToken(payload.token);
+  }
+  return payload; // { token, account }
+}
+
 export async function getSession() {
   return apiRequest('/api/auth/session', { method: 'GET' });
 }
