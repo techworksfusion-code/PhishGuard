@@ -6,6 +6,7 @@ const { optionalAuth } = require('../middleware/auth');
 const { normalizeUrl } = require('../utils/normalizeUrl');
 const { verdictFromScore } = require('../utils/verdict');
 const { findOrCreateUrl } = require('../services/urls.service');
+const { getVoteStats } = require('../services/votes.service');
 const { analyze } = require('../analyzer');
 const { analyzeWithGemini } = require('../services/gemini.service');
 const { persistCheck } = require('../services/checks.service');
@@ -62,6 +63,8 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
     signals: allSignals,
   });
 
+  const votes = getVoteStats(urlId, { userId: req.user ? req.user.id : null });
+
   res.json({
     valid: true,
     host: parsed.host,
@@ -70,6 +73,8 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
     ai: aiResult.status === 'ok' ? 'ok' : 'unavailable',
     signals: allSignals,
     checkId,
+    urlHash: parsed.hash,
+    votes,
   });
 }));
 

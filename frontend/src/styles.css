@@ -324,6 +324,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fb4c0080; outlin
 .community-card strong { font-size: 10px; }
 .community-card small { color: var(--muted); font-size: 9px; }
 .community-card button { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #f5f5ee; font-size: 10px; font-weight: 600; cursor: pointer; }
+
+/* Real community votes (BACKEND_DESIGN.md §4.5) */
+.community-card-real .vote-row { display: grid; gap: 6px; }
+.community-card-real .vote-row button:disabled { opacity: .5; cursor: default; }
+.community-card-real .vote-row button.voted { border-color: #9a3412; color: #9a3412; background: #fff4ee; }
+.community-card-real .vote-row button.voted.safe { border-color: #14532d; color: #14532d; background: #f2fbf4; }
+.community-card-real .vote-error { color: #b91c1c; }
 .sample-note { color: var(--muted); font-size: 9px; line-height: 1.55; }
 .activity-page .outline-button { margin-top: 18px; }
 .activity-page .outline-button svg { margin-left: 0; }

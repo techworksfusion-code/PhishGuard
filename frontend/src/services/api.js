@@ -95,6 +95,10 @@ function normalizeResult(payload) {
     verdict: payload.verdict,
     signals,
     ai: payload.ai === 'ok' ? 'ok' : 'unavailable',
+    urlHash: typeof payload.urlHash === 'string' ? payload.urlHash : null,
+    votes: payload.votes && Number.isInteger(payload.votes.dangerous) && Number.isInteger(payload.votes.safe)
+      ? { dangerous: payload.votes.dangerous, safe: payload.votes.safe, my: payload.votes.my || null }
+      : null,
   };
 }
 
@@ -112,6 +116,21 @@ export async function checkLink(url) {
   });
 
   return normalizeResult(payload);
+}
+
+// ---------- Community votes ----------
+
+// Vote a checked link dangerous/safe. Requires a signed-in account.
+export async function voteLink(urlHash, vote) {
+  return apiRequest(`/api/links/${urlHash}/vote`, {
+    method: 'POST',
+    body: JSON.stringify({ vote }),
+  });
+}
+
+// Aggregated verdicts for a checked link (public; personal vote when authed).
+export async function getLinkSummary(urlHash) {
+  return apiRequest(`/api/links/${urlHash}/summary`, { method: 'GET' });
 }
 
 // ---------- Auth ----------

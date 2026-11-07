@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { checkLink, register, requestOtp, verifyOtp as verifyOtpApi, login, logout, getSession, isAuthenticated, getGoogleAuthUrl, exchangeGoogleCode } from './services/api.js';
+import { checkLink, register, requestOtp, verifyOtp as verifyOtpApi, login, logout, getSession, isAuthenticated, getGoogleAuthUrl, exchangeGoogleCode, voteLink, getLinkSummary } from './services/api.js';
 
 const sampleMessages = [
   { id: 1, sender: 'Mom', initials: 'M', time: '10:34', text: "Don't forget dinner at 7 tonight!", kind: 'safe', unread: true },
@@ -529,6 +529,7 @@ export default function App() {
       <button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Back to scanner</button>
       <div className={`result-hero ${risk}`}><span className="result-icon"><Icon name={scan.verdict === 'Low risk' ? 'shield' : 'alert'} size={30} /></span><p className="eyebrow">LINK ANALYSIS</p><h2>{scan.verdict === 'Low risk' ? 'Looks safe to us.' : scan.verdict === 'Suspicious' ? 'Be careful with this.' : "We wouldn't open this."}</h2><p>{scan.verdict === 'Low risk' ? 'No known red flags were found. Stay alert, even with links that look familiar.' : 'This link shows signs that may point to a fraudulent website.'}</p><div className="score-wrap"><span>Risk score</span><strong>{scan.score}<small>/100</small></strong><div className="score-track"><i style={{ width: `${scan.score}%` }} /></div></div></div>
       <div className="domain-chip"><Icon name="globe" size={18} /><span>{scan.host}</span><strong className={`risk-label ${risk}`}>{scan.verdict}</strong></div>
+      {scan.urlHash && <CommunityVotes urlHash={scan.urlHash} />}
       <div className="result-section"><h3>What stood out</h3>{scan.signals.length ? scan.signals.map((signal, index) => <div className="signal-row" key={`${signal.title}-${index}`}><span className="signal-icon"><Icon name={signal.title.includes('secure') ? 'lock' : 'alert'} size={17} /></span><span><strong>{signal.title}</strong><small>{signal.detail}</small></span></div>) : <div className="signal-row"><span className="signal-icon safe"><Icon name="check" size={17} /></span><span><strong>No known red flags found</strong><small>This is not a guarantee that the website is safe.</small></span></div>}</div>
       <div className="advisory"><Icon name="lock" size={18} /><span><strong>Remember</strong><small>Never share your password, PIN, or one-time passcode from a link.</small></span></div>
       <button className="primary-button" onClick={() => { setUrl(''); setError(''); setPage(''); }}>Check another link <Icon name="arrow" size={18} /></button>
@@ -543,7 +544,7 @@ export default function App() {
       <div className="captured-banner"><span className="banner-icon"><Icon name="scan" /></span><span><strong>AI monitoring system</strong><small>Suspicious SMS intercepted · Case SM-0241</small></span><span className="captured-tag">CAPTURED</span></div>
       <div className="content-section"><h3>Captured message</h3><div className="captured-message"><p>URGENT: Your account is locked. Verify your identity now at secure-account-help.example</p><small>From Unknown sender · Sample SMS</small></div></div>
       <div className="content-section"><h3>Link evidence <span className="risk-label dangerous">HIGH RISK</span></h3><DetailField label="DOMAIN" value={activitySample.domain} /><DetailField label="REGISTRAR" value={<>{activitySample.registrar} <em>· sample</em></>} /><DetailField label="REGISTERED" value={<>{activitySample.registered} <em>· sample</em></>} /><DetailField label="SIGNAL" value={activitySample.signal} /></div>
-      <div className="community-card"><div><strong>{upvoted ? '1,285' : '1,284'} scam votes</strong><small>Community reports · illustrative data</small></div><button disabled={upvoted} onClick={() => setUpvoted(true)}>{upvoted ? 'Voted' : '♧  Upvote'}</button></div>
+      {scan && scan.urlHash ? <CommunityVotes urlHash={scan.urlHash} /> : <div className="community-card"><div><strong>Community verdicts live on scan results</strong><small>Check a link to read and add community reports.</small></div></div>}
       <p className="sample-note">Activity data from your PhishGuard account.</p>
       <button className="outline-button" onClick={() => setPage('forensics')}>Open full forensic report <Icon name="arrow" size={18} /></button>
     </div>;
@@ -589,7 +590,7 @@ export default function App() {
     if (page === 'scan-result') return renderScanResult();
     if (['protection', 'notifications', 'privacy', 'subscription', 'account', 'support'].includes(page)) return renderSettingPage();
     if (['message-details', 'blocked-details', 'conversation'].includes(page)) return renderMessageDetail();
-    if (page === 'forensics') return <Forensics onBack={goBack} />;
+    if (page === 'forensics') return <Forensics onBack={goBack} scan={scan} />;
     if (page) return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Back</button><SectionTitle title={page === 'notifications' ? 'Notifications' : 'Your activity'} /></div>;
     if (tab === 'home') return renderHome();
     if (tab === 'inbox') return renderInbox();
@@ -623,8 +624,69 @@ function DetailField({ label, value }) {
   return <div className="detail-field"><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function Forensics({ onBack }) {
-  const [upvoted, setUpvoted] = useState(false);
+function CommunityVotes({ urlHash }) {
+  const [stats, setStats] = useState(null);
+  const [hidden, setHidden] = useState(false);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!urlHash) return undefined;
+    let active = true;
+    setStats(null);
+    setHidden(false);
+    setError('');
+
+    getLinkSummary(urlHash)
+      .then((payload) => {
+        if (active) {
+          setStats({ dangerous: payload.dangerous, safe: payload.safe, my: payload.my || null });
+        }
+      })
+      .catch(() => {
+        // Unknown link (not scanned yet) or network issue — card stays hidden.
+        if (active) setHidden(true);
+      });
+
+    return () => { active = false; };
+  }, [urlHash]);
+
+  async function vote(choice) {
+    setError('');
+    setBusy(true);
+    try {
+      const payload = await voteLink(urlHash, choice);
+      setStats({ dangerous: payload.dangerous, safe: payload.safe, my: payload.my || null });
+    } catch (err) {
+      setError(/credentials|auth/i.test(err?.message || '') ? 'Sign in to add your verdict.' : (err?.message || 'Could not submit your verdict.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!urlHash || hidden) return null;
+
+  const total = stats ? stats.dangerous + stats.safe : null;
+  return (
+    <div className="community-card community-card-real">
+      <div>
+        <strong>{total ? `${stats.dangerous} scam · ${stats.safe} safe` : 'No community verdicts yet'}</strong>
+        <small>Community verdicts for this link{stats && stats.my ? ` · yours: ${stats.my}` : ''}</small>
+        {error && <small className="vote-error" role="alert">{error}</small>}
+      </div>
+      <div className="vote-row">
+        <button disabled={busy || (stats && stats.my === 'dangerous')} className={stats && stats.my === 'dangerous' ? 'voted' : ''} onClick={() => vote('dangerous')}>
+          {stats && stats.my === 'dangerous' ? '✓ Reported' : 'Scam'}
+        </button>
+        <button disabled={busy || (stats && stats.my === 'safe')} className={stats && stats.my === 'safe' ? 'voted safe' : ''} onClick={() => vote('safe')}>
+          {stats && stats.my === 'safe' ? '✓ Marked safe' : 'Safe'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Forensics({ onBack, scan }) {
   const [storyStep, setStoryStep] = useState(0);
   const story = [
     { title: 'A message arrives', detail: 'A text claims the recipient account is locked and creates pressure to act immediately.' },
@@ -697,7 +759,7 @@ function Forensics({ onBack }) {
 
     <div className="content-section"><h3>Domain intelligence</h3><DetailField label="DOMAIN" value={activitySample.domain} /><DetailField label="REGISTRAR" value={<>{activitySample.registrar} <em>· sample</em></>} /><DetailField label="REGISTERED" value={<>{activitySample.registered} <em>· sample</em></>} /><DetailField label="SIGNAL" value={activitySample.signal} /></div>
     <div className="content-section"><h3>Detection signals</h3>{signals.map((signal, index) => <div className="forensic-signal" key={signal.title}><span>0{index + 1}</span><div><strong>{signal.title}</strong><small>{signal.description}</small></div></div>)}</div>
-      <div className="community-card"><div><strong>{upvoted ? '1,285' : '1,284'} scam votes</strong><small>Community reports from your PhishGuard account</small></div><button disabled={upvoted} onClick={() => setUpvoted(true)}>{upvoted ? 'Voted' : '♧  Upvote'}</button></div>
+      {scan && scan.urlHash ? <CommunityVotes urlHash={scan.urlHash} /> : <div className="community-card"><div><strong>Community verdicts live on scan results</strong><small>Check a link to read and add community reports.</small></div></div>}
     <p className="sample-note">Data from your PhishGuard account.</p>
     <button className="outline-button" onClick={onBack}>Back to activity <Icon name="back" size={18} /></button>
   </div>;

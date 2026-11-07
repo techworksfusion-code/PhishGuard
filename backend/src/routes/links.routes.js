@@ -7,6 +7,7 @@ const Router = require('express').Router;
 const { asyncHandler } = require('../utils/asyncHandler');
 const { requireAuth } = require('../middleware/auth');
 const { db } = require('../db');
+const { getVoteStats, castVote } = require('../services/votes.service');
 
 const router = Router();
 
@@ -15,14 +16,6 @@ const URL_HASH_RE = /^[a-f0-9]{64}$/i;
 
 function getUrlByUrlHash(urlHash) {
   return db.prepare('SELECT id, url, host FROM urls WHERE url_hash = ?').get(urlHash);
-}
-
-function getStats(urlId) {
-  return db.prepare(
-    `SELECT COALESCE(SUM(CASE WHEN vote = 'dangerous' THEN 1 ELSE 0 END), 0) AS dangerous_votes,
-            COALESCE(SUM(CASE WHEN vote = 'safe'      THEN 1 ELSE 0 END), 0) AS safe_votes
-       FROM threat_votes WHERE url_id = ?`
-  ).get(urlId);
 }
 
 // POST /api/links/:urlHash/vote 🔒 — body: { vote: 'dangerous' | 'safe' }
@@ -44,30 +37,15 @@ router.post('/:urlHash/vote', requireAuth, asyncHandler(async (req, res) => {
   }
 
   // One vote per account per URL: update the existing row if present.
-  const updated = db.prepare(
-    `UPDATE threat_votes SET vote = ? WHERE url_id = ? AND reporter_id = ?`
-  ).run(vote, url.id, req.user.id);
+  castVote({ urlId: url.id, userId: req.user.id, vote });
 
-  if (updated.changes === 0) {
-    try {
-      db.prepare(
-        'INSERT INTO threat_votes (url_id, reporter_id, vote) VALUES (?, ?, ?)'
-      ).run(url.id, req.user.id, vote);
-    } catch (err) {
-      // Lost a race with an insert from the same account — re-run the update.
-      if (String(err.code) !== 'SQLITE_CONSTRAINT_UNIQUE') throw err;
-      db.prepare(
-        `UPDATE threat_votes SET vote = ? WHERE url_id = ? AND reporter_id = ?`
-      ).run(vote, url.id, req.user.id);
-    }
-  }
-
-  const stats = getStats(url.id);
+  const stats = getVoteStats(url.id, { userId: req.user.id });
   res.json({
     valid: true,
     host: url.host,
-    ...stats,
-    my_vote: vote,
+    dangerous: stats.dangerous,
+    safe: stats.safe,
+    my: stats.my,
   });
 }));
 
@@ -84,15 +62,14 @@ router.get('/:urlHash/summary', asyncHandler(async (req, res) => {
     return res.status(404).json({ error: 'Unknown link.' });
   }
 
-  let myVote = null;
-  if (req.user) {
-    const mine = db.prepare(
-      'SELECT vote FROM threat_votes WHERE url_id = ? AND reporter_id = ?'
-    ).get(url.id, req.user.id);
-    myVote = mine ? mine.vote : null;
-  }
-
-  res.json({ valid: true, host: url.host, ...getStats(url.id), my_vote: myVote });
+  const stats = getVoteStats(url.id, { userId: req.user ? req.user.id : null });
+  res.json({
+    valid: true,
+    host: url.host,
+    dangerous: stats.dangerous,
+    safe: stats.safe,
+    my: stats.my,
+  });
 }));
 
 module.exports = router;
