@@ -17,6 +17,11 @@ const authRoutes = require('./routes/auth.routes');
 function createApp() {
   const app = express();
 
+  // One proxy hop (cloudflared, and the frontend's /api reverse-proxy) precedes
+  // Express. With this set, req.ip is the real visitor address, so rate
+  // limits are per user instead of shared by the whole tunnel.
+  app.set('trust proxy', 1);
+
   app.use(requestLogger);
   app.use(helmet({ crossOriginResourcePolicy: false }));
   const allowedOrigins = [
