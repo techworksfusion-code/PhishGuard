@@ -26,6 +26,14 @@ module.exports = {
       env: {
         WEB_PORT: 8080
       }
+    },
+    {
+      name: 'phishguard-retention',
+      // One-shot purge (BACKEND_DESIGN.md §2.4), re-run by cron every 6 h.
+      script: 'scripts/retention.js',
+      cwd: __dirname + '/../../backend',
+      autorestart: false,
+      cron_restart: '7 */6 * * *'
     }
   ]
 };
