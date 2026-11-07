@@ -12,6 +12,9 @@ backend/data/
 **/.env
 **/.env.*
 !**/.env.example
+# Google OAuth credential files downloaded from console.cloud.google.com
+client_secret_*.json
+**/client_secret_*.json
 
 # Local logs and operating-system files
 *.log
