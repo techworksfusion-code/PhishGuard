@@ -1,5 +1,13 @@
 {
   "appId": "com.phishguard.app",
   "appName": "PhishGuard",
-  "webDir": "dist"
+  "webDir": "dist",
+  "server": {
+    "url": "https://guard.fusiontechworks.in",
+    "allowNavigation": [
+      "guard.fusiontechworks.in",
+      "accounts.google.com",
+      "accounts.googleapis.com"
+    ]
+  }
 }

@@ -4,6 +4,9 @@
 **/build/
 **/.gradle/
 
+# Generated Android APK artifacts (rebuilt with gradlew, never committed)
+*.apk
+
 # Local SQLite database files
 backend/data/
 **/*.db

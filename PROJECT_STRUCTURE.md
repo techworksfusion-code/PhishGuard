@@ -84,10 +84,14 @@ PhishGuard/
 
 ### Code
 
-- Backend M0–M1 are implemented (see `backend/README.md` for setup and the
-  locked `POST /api/check-link` contract, and `BACKEND_DESIGN.md` for the build
-  order). Link analysis, authentication, and real-time alerts remain planned.
-  The migrations in `backend/db/migrations/` are real and idempotent.
+- Backend implements the API surface from `BACKEND_DESIGN.md` §3 except the
+  real-time alert endpoints (`/api/scan-message`, `/api/alerts`, §8A) and the
+  community-vote endpoints (`/api/links/:urlHash/*`, phase 2 — schema exists,
+  routes planned). Implemented: health, check-link, history, and the full
+  account workflow (register, OTP over console/Gmail SMTP, login, Google
+  OAuth, session get/revoke, account deletion).
+- The community-report (`002_threat_reports.sql`) and alerts
+  (`003_alerts.sql`) migrations exist and run, but their routes do not yet.
 - `frontend/src/App.jsx` contains the responsive preview screens with
   browser-history navigation and native Android back-button support
   (`@capacitor/app`). `frontend/src/styles.css` defines the mobile and desktop UI.
@@ -95,16 +99,15 @@ PhishGuard/
   (score range, verdict bands, per-signal shape) before rendering it.
 - `frontend/src/utils/demoAnalyzer.js` mirrors the backend rule engine for
   development preview only; production builds never enable it.
-- `frontend/android/` is a Capacitor-generated Android project. The native SMS
-  receiver described in the two design documents sends extracted **links only**;
-  message text and sender numbers stay on the device.
 - `deployment/` contains VPS process-manager and Cloudflare Tunnel configuration.
 - `.env.example` files document required settings; real credentials belong in
   local environment files and must not be committed.
 
 ### Sample data notice
 
-Inbox, threat totals, activity, forensic report, and community-vote content are
-illustrative. SMS access, authentication, server integration, and the
-real-time alert pipeline are specified in the design documents but not
-implemented yet.
+Inbox, threat totals, and activity content remain illustrative where noted.
+Authentication is real (password + OTP + Google OAuth, live through the
+Cloudflare Tunnel at `guard.fusiontechworks.in`), link checks hit the real
+backend, and threat history is persisted in SQLite. Real-time SMS access, the
+native Android alert pipeline, and community voting are specified in the
+design documents but not implemented yet.

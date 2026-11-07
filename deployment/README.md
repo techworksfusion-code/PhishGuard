@@ -59,4 +59,4 @@ curl -s -X POST https://api.yourdomain.com/api/check-link \
 
 - `gemini-1.5-flash` is retired; confirm the current Flash model name at [ai.google.dev](https://ai.google.dev) and set `GEMINI_MODEL` accordingly.
 - Update the frontend (`frontend/.env.local` → `VITE_API_URL=https://api.yourdomain.com`, `VITE_DEMO_MODE=false`) before the production build.
-- Threat history is in memory only — restarting PM2 resets it. This is intentional: no personal data is stored per the privacy requirements.
+- Threat history is persisted in SQLite (`checks` table), subject to the retention policy in `BACKEND_DESIGN.md` §2.4.
