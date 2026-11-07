@@ -30,6 +30,9 @@ Copy `.env.example` (create it locally — real credentials are never committed)
 | `SCAN_RATE_PER_TOKEN` | Per-token rate cap on `/api/scan-message`; defaults to `20` |
 | `GEMINI_DAILY_MAX` | Per-day Gemini call ceiling; over-cap falls back to rules with `"ai": "unavailable"` |
 | `OTP_CHANNEL` | `console` (dev) \| `smtp` \| `telegram` \| `whatsapp` (Baileys — chosen production channel for the lab) |
+| `SMTP_HOST` / `SMTP_PORT` | SMTP server for the `smtp` channel; defaults `smtp.gmail.com:465`. Only needed when `OTP_CHANNEL=smtp` |
+| `SMTP_USER` / `SMTP_PASS` | Gmail address / **16-character App Password** (Google Account → Security → 2-Step Verification → App passwords). Regular account passwords are rejected by Gmail |
+| `SMTP_FROM` | Optional custom From line, e.g. `PhishGuard OTP <you@gmail.com>` |
 | `WHATSAPP_SESSION_DIR` | Directory holding the paired Baileys session keys (gitignored, backed up once) |
 
 Create `backend/.env` from [`.env.example`](.env.example), set
