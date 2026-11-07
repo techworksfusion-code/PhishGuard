@@ -76,6 +76,7 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
   const [apiError, setApiError] = useState('');
 
   const [otpCode, setOtpCode] = useState('');
+  const [otpPurpose, setOtpPurpose] = useState('register');
 
   async function submit(event) {
     event.preventDefault();
@@ -106,6 +107,7 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
         if (result.requiresOtp) {
           setOtpNotice('Verification code sent.');
           if (result.code) setOtpCode(result.code);
+          setOtpPurpose(stage);
           onStageChange('otp');
           return;
         }
@@ -116,7 +118,7 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
       }
       setOtpNotice('Verification code sent.');
       if (otpResult.code) setOtpCode(otpResult.code);
-      onStageChange('otp');
+      setOtpPurpose(stage);
       onStageChange('otp');
     } catch (err) {
       setApiError(err instanceof Error ? err.message : 'Unable to process your request.');
@@ -131,8 +133,8 @@ function AuthFlow({ stage, onStageChange, onComplete }) {
     }
     try {
       const destination = otpDestination;
-      const purpose = stage === 'register' ? 'register' : 'login';
-      const registerPayload = stage === 'register' ? { name: pendingAccount?.name, email: contactMethod === 'email' ? otpDestination : undefined, phone: contactMethod === 'phone' ? otpDestination : undefined, password } : {};
+      const purpose = otpPurpose;
+      const registerPayload = otpPurpose === 'register' ? { name: pendingAccount?.name, email: contactMethod === 'email' ? otpDestination : undefined, phone: contactMethod === 'phone' ? otpDestination : undefined, password } : {};
 
       const result = await verifyOtpApi({ destination, code: otp, purpose, ...registerPayload });
       if (result.token && result.account) {
