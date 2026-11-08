@@ -169,7 +169,13 @@ function analyzeMessage(rawText) {
   const matchedKeywords = rules.keywords.filter((word) => lower.includes(word));
   if (matchedKeywords.length) {
     const points = Math.min(matchedKeywords.length * rules.points.scamKeyword, rules.caps.scamKeywordMax);
-    signals.push({ name: 'Scam keyword', points, detail: `Contains: ${matchedKeywords.join(', ')}` });
+    signals.push({
+      name: 'Scam keyword',
+      points,
+      detail: `Contains: ${matchedKeywords.join(', ')}`,
+      source: 'rules',
+      evidence: matchedKeywords.slice(),
+    });
     textScore += points;
   }
 
@@ -178,7 +184,7 @@ function analyzeMessage(rawText) {
   for (const rule of rules.messagePatterns || []) {
     if (rule.skipIfNegated && negated) continue;
     if (new RegExp(rule.pattern, 'i').test(text)) {
-      signals.push({ name: rule.name, points: rule.points, detail: rule.detail });
+      signals.push({ name: rule.name, points: rule.points, detail: rule.detail, source: 'rules' });
       textScore += rule.points;
     }
   }
@@ -197,13 +203,19 @@ function analyzeMessage(rawText) {
 
   if (bestLink) {
     for (const signal of bestLink.signals) {
-      signals.push({ ...signal, detail: `${signal.detail} (link: ${bestLink.host})` });
+      signals.push({
+        ...signal,
+        detail: `${signal.detail} (link: ${bestLink.host})`,
+        source: 'rules',
+        link: bestLink.host,
+      });
     }
     if (links.length > 1) {
       signals.push({
         name: 'Multiple links',
         points: 5,
         detail: `${links.length} links found in one message.`,
+        source: 'rules',
       });
       textScore += 5;
     }

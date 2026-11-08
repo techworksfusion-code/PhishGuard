@@ -90,6 +90,10 @@ test('POST /api/scan-message returns a verdict and never stores the text', async
   assert.equal(body.verdict, 'Dangerous');
   assert.equal(body.ai, 'unavailable'); // placeholder key in tests
   assert.ok(body.signals.length > 0);
+  assert.ok(body.signals.some((signal) => signal.source === 'rules'));
+  assert.deepEqual(body.links, ['http://sbi-kyc-update.xyz/login']);
+  assert.equal(body.ruleScore, 100);
+  assert.equal(body.aiScore, null);
   assert.equal(typeof body.alertId, 'number');
   assert.equal(body.linkCount, 1);
 

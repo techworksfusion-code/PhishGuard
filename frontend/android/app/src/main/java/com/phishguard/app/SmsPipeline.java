@@ -2,6 +2,7 @@ package com.phishguard.app;
 
 import android.content.Context;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -33,6 +34,8 @@ public final class SmsPipeline {
             alert.put("score", Math.max(local.score, 100));
             alert.put("verdict", "Dangerous");
             alert.put("reason", "blocked_sender");
+            appendSystemSignal(alert, "Blocked sender",
+                    "You previously blocked this sender, so the message was quarantined automatically.");
             store.addQuarantine(alert);
             store.setLastAlert(alert);
             Notifier.alert(context, alert);
@@ -44,12 +47,10 @@ public final class SmsPipeline {
 
         if (localDangerous) {
             // Instant protection while the network call is in flight.
-            alert.put("source", "local");
             store.addQuarantine(alert);
             store.setLastAlert(alert);
             Notifier.alert(context, alert);
         } else if (localSuspicious) {
-            alert.put("source", "local");
             store.setLastAlert(alert);
             Notifier.alert(context, alert);
         }
@@ -58,20 +59,30 @@ public final class SmsPipeline {
 
         if (remote.failed()) {
             // Offline: honour the on-device verdict and block dangerous senders.
+            appendSystemSignal(alert, "AI unavailable",
+                    "The server could not be reached, so this report shows the on-device rules only.");
+            alert.put("ai", "unavailable");
             if (localDangerous) {
                 store.blockSender(senderHash);
-                alert.put("ai", "unavailable");
                 store.upsertQuarantine(alert);
                 store.setLastAlert(alert);
                 return alert;
             }
-            return (localSuspicious) ? alert : null;
+            return localSuspicious ? alert : null;
         }
 
         alert.put("score", remote.score);
         alert.put("verdict", remote.verdict);
         alert.put("ai", remote.ai);
         alert.put("source", "server");
+        alert.put("signals", remote.signals);
+        alert.put("links", remote.links);
+        alert.put("ruleScore", remote.ruleScore >= 0 ? remote.ruleScore : local.score);
+        if (remote.aiScore >= 0) {
+            alert.put("aiScore", remote.aiScore);
+        } else {
+            alert.remove("aiScore");
+        }
 
         if (remote.dangerous()) {
             store.blockSender(senderHash);
@@ -109,9 +120,43 @@ public final class SmsPipeline {
         alert.put("score", local.score);
         alert.put("verdict", local.verdict);
         alert.put("localVerdict", local.verdict);
-        alert.put("ai", "unavailable");
+        alert.put("ai", "pending");
+        alert.put("ruleScore", local.score);
         alert.put("linkCount", local.links.size());
+        alert.put("links", new JSONArray(local.links));
+        alert.put("signals", localSignals(local));
+        alert.put("source", "local");
         alert.put("createdAt", id);
         return alert;
+    }
+
+    /** Offline evidence, shaped like the server's signal objects. */
+    private static JSONArray localSignals(OfflineRules.Result local) throws Exception {
+        JSONArray signals = new JSONArray();
+        for (String reason : local.reasons) {
+            JSONObject signal = new JSONObject();
+            boolean isLink = reason.startsWith("Link: ");
+            signal.put("name", isLink ? "Link detected" : "On-device rule");
+            signal.put("detail", reason);
+            signal.put("points", 0);
+            signal.put("source", "rules");
+            if (isLink) {
+                signal.put("link", reason.substring("Link: ".length()));
+            }
+            signals.put(signal);
+        }
+        return signals;
+    }
+
+    private static void appendSystemSignal(JSONObject alert, String name, String detail) throws Exception {
+        JSONArray signals = alert.optJSONArray("signals");
+        if (signals == null) signals = new JSONArray();
+        JSONObject signal = new JSONObject();
+        signal.put("name", name);
+        signal.put("detail", detail);
+        signal.put("points", 0);
+        signal.put("source", "system");
+        signals.put(signal);
+        alert.put("signals", signals);
     }
 }

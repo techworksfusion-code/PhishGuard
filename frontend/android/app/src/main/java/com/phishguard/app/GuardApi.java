@@ -2,6 +2,7 @@ package com.phishguard.app;
 
 import android.content.Context;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -20,23 +21,34 @@ public final class GuardApi {
 
     public static class Result {
         public final int score;
+        public final int ruleScore;
+        public final int aiScore; // -1 when the AI check was unavailable
         public final String verdict;
         public final String ai;
+        public final JSONArray signals;
+        public final JSONArray links;
         public final String error;
 
-        private Result(int score, String verdict, String ai, String error) {
+        private Result(int score, int ruleScore, int aiScore, String verdict, String ai,
+                       JSONArray signals, JSONArray links, String error) {
             this.score = score;
+            this.ruleScore = ruleScore;
+            this.aiScore = aiScore;
             this.verdict = verdict;
             this.ai = ai;
+            this.signals = signals;
+            this.links = links;
             this.error = error;
         }
 
-        static Result ok(int score, String verdict, String ai) {
-            return new Result(score, verdict, ai, null);
+        static Result ok(int score, int ruleScore, int aiScore, String verdict, String ai,
+                         JSONArray signals, JSONArray links) {
+            return new Result(score, ruleScore, aiScore, verdict, ai, signals, links, null);
         }
 
         static Result error(String message) {
-            return new Result(0, "Low risk", "unavailable", message);
+            return new Result(0, -1, -1, "Low risk", "unavailable",
+                    new JSONArray(), new JSONArray(), message);
         }
 
         public boolean failed() {
@@ -99,10 +111,17 @@ public final class GuardApi {
             }
 
             JSONObject json = new JSONObject(body);
+            JSONArray signals = json.optJSONArray("signals");
+            JSONArray links = json.optJSONArray("links");
+            int aiScore = (json.has("aiScore") && !json.isNull("aiScore")) ? json.optInt("aiScore", -1) : -1;
             return Result.ok(
                     json.optInt("score", 0),
+                    json.optInt("ruleScore", -1),
+                    aiScore,
                     json.optString("verdict", "Low risk"),
-                    json.optString("ai", "unavailable")
+                    json.optString("ai", "unavailable"),
+                    signals == null ? new JSONArray() : signals,
+                    links == null ? new JSONArray() : links
             );
         } catch (Exception e) {
             return Result.error(e.getClass().getSimpleName());

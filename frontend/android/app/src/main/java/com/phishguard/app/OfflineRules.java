@@ -23,11 +23,13 @@ public final class OfflineRules {
         public final int score;
         public final String verdict;
         public final List<String> links;
+        public final List<String> reasons;
 
-        Result(int score, String verdict, List<String> links) {
+        Result(int score, String verdict, List<String> links, List<String> reasons) {
             this.score = score;
             this.verdict = verdict;
             this.links = links;
+            this.reasons = reasons;
         }
     }
 
@@ -95,18 +97,26 @@ public final class OfflineRules {
 
     public static Result evaluate(String rawText) {
         String text = rawText == null ? "" : rawText.trim();
+        List<String> reasons = new ArrayList<>();
         if (text.isEmpty()) {
-            return new Result(0, "Low risk", new ArrayList<String>());
+            return new Result(0, "Low risk", new ArrayList<String>(), reasons);
         }
 
         String lower = text.toLowerCase(Locale.ROOT);
         int textScore = 0;
 
         int keywordHits = 0;
+        List<String> matchedKeywords = new ArrayList<>();
         for (String keyword : KEYWORDS) {
-            if (lower.contains(keyword)) keywordHits++;
+            if (lower.contains(keyword)) {
+                keywordHits++;
+                matchedKeywords.add(keyword);
+            }
         }
-        textScore += Math.min(keywordHits * 25, 50);
+        if (keywordHits > 0) {
+            textScore += Math.min(keywordHits * 25, 50);
+            reasons.add("Keywords: " + join(matchedKeywords));
+        }
 
         boolean negated = false;
         for (String phrase : NEGATIONS) {
@@ -120,6 +130,7 @@ public final class OfflineRules {
             if ("1".equals(rule[3]) && negated) continue;
             if (Pattern.compile(rule[1]).matcher(text).find()) {
                 textScore += Integer.parseInt(rule[2]);
+                reasons.add(rule[0]);
             }
         }
 
@@ -127,11 +138,21 @@ public final class OfflineRules {
         int linkScore = 0;
         for (String link : links) {
             linkScore = Math.max(linkScore, scoreLink(link));
+            reasons.add("Link: " + link);
         }
 
         int score = Math.min(100, Math.max(textScore, linkScore));
         String verdict = score >= 60 ? "Dangerous" : (score >= 30 ? "Suspicious" : "Low risk");
-        return new Result(score, verdict, links);
+        return new Result(score, verdict, links, reasons);
+    }
+
+    private static String join(List<String> items) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) builder.append(", ");
+            builder.append(items.get(i));
+        }
+        return builder.toString();
     }
 
     public static List<String> extractLinks(String text) {

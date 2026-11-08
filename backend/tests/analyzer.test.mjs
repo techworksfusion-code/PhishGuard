@@ -41,6 +41,8 @@ test('flags a full scam SMS containing a link', () => {
   assert.equal(verdictFromScore(result.score), 'Dangerous');
   assert.equal(result.links.length, 1);
   assert.ok(result.signals.length > 0);
+  assert.ok(result.signals.every((signal) => signal.source === 'rules'));
+  assert.ok(result.signals.some((signal) => signal.link === 'sbi-kyc-update.xyz'));
 });
 
 test('flags a text-only scam with no link', () => {

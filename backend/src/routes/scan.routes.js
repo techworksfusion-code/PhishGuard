@@ -49,18 +49,19 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
   const finalScore = Math.min(100, Math.max(ruleResult.score, aiScore));
   const verdict = verdictFromScore(finalScore);
 
-  const signals = [...ruleResult.signals];
-  if (aiResult.status === 'ok') {
-    if (aiResult.signals.length) {
-      signals.push(...aiResult.signals);
-    }
-  } else {
+  const signals = ruleResult.signals.map((signal) => ({ ...signal, source: 'rules' }));
+  const aiSignals = aiResult.status === 'ok'
+    ? aiResult.signals.map((signal) => ({ ...signal, source: 'ai' }))
+    : [];
+  signals.push(...aiSignals);
+  if (aiResult.status !== 'ok') {
     signals.push({
       name: 'AI check',
       points: 0,
       detail: aiResult.reason === 'daily_cap'
         ? 'AI budget reached for today — rules-only result'
         : 'AI analysis unavailable — rules-only result',
+      source: 'system',
     });
   }
 
@@ -96,7 +97,10 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
     score: finalScore,
     verdict,
     ai: aiResult.status === 'ok' ? 'ok' : 'unavailable',
+    aiScore: aiResult.status === 'ok' ? aiResult.score : null,
+    ruleScore: ruleResult.score,
     signals,
+    links: ruleResult.links,
     linkCount: ruleResult.links.length,
     alertId,
   });

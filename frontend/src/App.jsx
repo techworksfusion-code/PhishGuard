@@ -279,6 +279,48 @@ function MessageRow({ message, onClick }) {
   </button>;
 }
 
+// Fallback for quarantine entries saved before links were persisted.
+function extractLinksFromBody(text) {
+  if (!text) return [];
+  const pattern = /(?:https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|in|net|org|co|io|xyz|top|tk|ml|cf|gq|click|icu|buzz|work|info|shop|live|online|site|store|app|link|pro|club|vip|cc|ru|cn|me)(?:\/[^\s<>"']*)?)/gi;
+  const found = [];
+  const seen = new Set();
+  let match;
+  while ((match = pattern.exec(text)) !== null && found.length < 5) {
+    const previous = match.index > 0 ? text[match.index - 1] : '';
+    if (previous === '@' || previous === '/' || /[a-z0-9._-]/i.test(previous)) continue;
+    let raw = match[0].replace(/[\s.,;:!?)\]}>"']+$/, '');
+    if (/^www\./i.test(raw)) raw = `http://${raw}`;
+    try {
+      const parsed = new URL(raw);
+      if (!['http:', 'https:'].includes(parsed.protocol)) continue;
+      const key = `${parsed.hostname}${parsed.pathname}${parsed.search}`.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        found.push(parsed.href);
+      }
+    } catch {
+      // Not a real link.
+    }
+  }
+  return found;
+}
+
+function hostOfLink(link) {
+  try {
+    return new URL(link).hostname;
+  } catch {
+    return link;
+  }
+}
+
+function ReportSignal({ signal }) {
+  return <div className="report-signal">
+    <div className="report-signal-head"><strong>{signal.name || 'Finding'}</strong>{signal.points > 0 && <span className="report-points">+{signal.points}</span>}</div>
+    {signal.detail && <p>{signal.detail}</p>}
+  </div>;
+}
+
 function Toggle({ checked, onChange, label }) {
   return <button className={`toggle ${checked ? 'is-on' : ''}`} role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)}><span /></button>;
 }
@@ -297,6 +339,7 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [selectedMessage, setSelectedMessage] = useState(null);
+  const [selectedAlert, setSelectedAlert] = useState(null);
   const [smsMessages, setSmsMessages] = useState([]);      // real device SMS
   const [smsStatus, setSmsStatus] = useState('idle');      // idle | loading | ready | denied | unavailable
   const [smsError, setSmsError] = useState('');
@@ -525,6 +568,11 @@ export default function App() {
     } catch {
       // Leave the item in place so the user can retry.
     }
+  }
+
+  function openAlertDetails(item) {
+    setSelectedAlert(item);
+    setPage('alert-details');
   }
 
   async function runGuardTest(kind) {
@@ -787,27 +835,111 @@ export default function App() {
     return <div className="page-content">
       <button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Blocked messages</button>
       <SectionTitle eyebrow="REAL-TIME PROTECTION" title="Quarantined SMS" />
-      <p className="subheading">Dangerous messages caught on this device. The system Messages app may still show the original SMS.</p>
+      <p className="subheading">Dangerous messages caught on this device. Open one to see exactly what the AI and rules found.</p>
       {!guard.available && <p className="sample-data-banner"><Icon name="shield" size={15} /> Quarantine is available in the PhishGuard Android app.</p>}
       {guard.available && !guard.smsPermission && <button className="primary-button" onClick={async () => { try { await requestGuardPermissions(); await refreshGuardState(); } catch { /* retry */ } }}>Allow SMS access</button>}
       <div className="guard-list">
-        {quarantine.map((item) => <article className="guard-item" key={item.id}>
-          <div className="guard-item-head"><strong>{item.sender || 'Unknown sender'}</strong><span className={`risk-label ${item.verdict === 'Dangerous' ? 'dangerous' : 'suspicious'}`}>{item.verdict}</span></div>
-          <p>{item.body}</p>
-          <small>{item.score}/100 · {item.ai === 'ok' ? 'AI + rules' : 'On-device rules'} · {item.createdAt ? new Date(item.createdAt).toLocaleString() : 'Just now'}</small>
-          <div className="guard-item-actions">
-            <button onClick={() => restoreQuarantined(item.id)}>Restore &amp; unblock</button>
-            <button onClick={() => removeQuarantined(item.id)}>Delete</button>
-          </div>
-        </article>)}
+        {quarantine.map((item) => {
+          const findings = Array.isArray(item.signals) ? item.signals.length : 0;
+          return <article className="guard-item" key={item.id}>
+            <div className="guard-item-head"><strong>{item.sender || 'Unknown sender'}</strong><span className={`risk-label ${item.verdict === 'Dangerous' ? 'dangerous' : 'suspicious'}`}>{item.verdict}</span></div>
+            <p>{item.body}</p>
+            <small>{item.score}/100 · {item.ai === 'ok' ? 'AI + rules' : item.ai === 'pending' ? 'Checking AI…' : 'On-device rules'} · {findings ? `${findings} findings` : 'Analysis pending'}{item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString()}` : ''}</small>
+            <button className="guard-analysis-button" onClick={() => openAlertDetails(item)}><Icon name="scan" size={16} /> View full analysis</button>
+            <div className="guard-item-actions">
+              <button onClick={() => restoreQuarantined(item.id)}>Restore &amp; unblock</button>
+              <button onClick={() => removeQuarantined(item.id)}>Delete</button>
+            </div>
+          </article>;
+        })}
         {guard.available && quarantine.length === 0 && <p className="empty-state">No blocked messages yet. Incoming SMS is checked automatically when real-time protection is on.</p>}
       </div>
+    </div>;
+  }
+
+  function renderAlertDetails() {
+    const alert = selectedAlert;
+    if (!alert) return renderBlocked();
+
+    const dangerous = alert.verdict === 'Dangerous';
+    const score = Math.min(100, Math.max(0, Number(alert.score) || 0));
+    const signals = Array.isArray(alert.signals) ? alert.signals : [];
+    const aiSignals = signals.filter((signal) => signal && signal.source === 'ai');
+    const linkSignals = signals.filter((signal) => signal && signal.link);
+    const ruleSignals = signals.filter((signal) => signal && signal.source !== 'ai' && signal.source !== 'system' && !signal.link);
+    const systemSignals = signals.filter((signal) => signal && signal.source === 'system');
+    const storedLinks = Array.isArray(alert.links) ? alert.links.filter(Boolean) : [];
+    const links = storedLinks.length ? storedLinks : extractLinksFromBody(alert.body);
+    const inQuarantine = quarantine.some((entry) => entry.id === alert.id);
+
+    return <div className="page-content alert-report">
+      <button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> {inQuarantine ? 'Blocked messages' : 'Back'}</button>
+
+      <div className={`report-hero ${dangerous ? 'dangerous' : 'suspicious'}`}>
+        <div className="report-hero-top">
+          <span className="report-shield"><Icon name={dangerous ? 'alert' : 'shield'} size={26} /></span>
+          <div className="report-identity"><p className="eyebrow">FULL SMS ANALYSIS</p><h2>{dangerous ? 'Scam message blocked' : 'Suspicious message'}</h2><small>From {alert.sender || 'Unknown sender'}</small></div>
+          <strong className="report-score">{score}<small>/100</small></strong>
+        </div>
+        <div className="score-track"><i style={{ width: `${score}%` }} /></div>
+        <div className="report-meta">
+          <span className={`risk-label ${dangerous ? 'dangerous' : 'suspicious'}`}>{alert.verdict}</span>
+          <span>{alert.ai === 'ok' ? 'AI + rules' : alert.ai === 'pending' ? 'Checking AI…' : 'On-device rules'}</span>
+          {typeof alert.ruleScore === 'number' && <span>Rules {alert.ruleScore}</span>}
+          {typeof alert.aiScore === 'number' && <span>AI {alert.aiScore}</span>}
+        </div>
+      </div>
+
+      <div className="content-section"><h3>Flagged message</h3><div className="captured-message"><strong>{alert.sender || 'Unknown sender'}</strong><p>{alert.body}</p><small>{alert.createdAt ? new Date(alert.createdAt).toLocaleString() : 'Just now'}</small></div></div>
+
+      {links.length > 0 && <div className="content-section"><h3>Links found <span className="report-count">{links.length}</span></h3><div className="report-link-list">
+        {links.map((link) => {
+          const host = hostOfLink(link);
+          const hostSignals = linkSignals.filter((signal) => {
+            if (!signal.link) return false;
+            if (signal.link === host || signal.link === link) return true;
+            try { return new URL(signal.link).hostname === host; } catch { return false; }
+          });
+          return <div className="report-link" key={link}>
+            <div className="report-link-head"><span className="report-link-icon"><Icon name="link" size={15} /></span><strong>{host}</strong></div>
+            <code>{link}</code>
+            {hostSignals.length > 0 && <div className="report-link-signals">{hostSignals.map((signal, index) => <ReportSignal key={`link-${index}`} signal={signal} />)}</div>}
+          </div>;
+        })}
+      </div></div>}
+
+      <div className="content-section"><h3>What the AI found {aiSignals.length > 0 && <span className="report-count">{aiSignals.length}</span>}</h3>
+        {aiSignals.length > 0
+          ? <div className="report-signals">{aiSignals.map((signal, index) => <ReportSignal key={`ai-${index}`} signal={signal} />)}</div>
+          : <p className="report-empty">{alert.ai === 'ok' ? 'The AI check added no extra findings beyond the rules.' : 'AI analysis was unavailable for this message — showing the on-device rules.'}</p>}
+      </div>
+
+      <div className="content-section"><h3>Message rules that fired {ruleSignals.length > 0 && <span className="report-count">{ruleSignals.length}</span>}</h3>
+        {ruleSignals.length > 0
+          ? <div className="report-signals">{ruleSignals.map((signal, index) => <ReportSignal key={`rule-${index}`} signal={signal} />)}</div>
+          : <p className="report-empty">No keyword or wording rules matched.</p>}
+      </div>
+
+      {systemSignals.length > 0 && <div className="content-section"><h3>Notes</h3><div className="report-signals">{systemSignals.map((signal, index) => <ReportSignal key={`system-${index}`} signal={signal} />)}</div></div>}
+
+      {!inQuarantine && <p className="report-note"><Icon name="shield" size={15} /> This message was flagged for review but was not quarantined. Suspicious messages are never blocked automatically.</p>}
+
+      <div className="report-actions">
+        {inQuarantine
+          ? <>
+            <button className="primary-button" onClick={async () => { await restoreQuarantined(alert.id); setSelectedAlert(null); setPage(''); }}>Restore &amp; unblock</button>
+            <button className="outline-button" onClick={async () => { await removeQuarantined(alert.id); setSelectedAlert(null); setPage(''); }}>Delete message</button>
+          </>
+          : <button className="primary-button" onClick={() => { setSelectedAlert(null); setPage(''); }}>Close report</button>}
+      </div>
+      <p className="report-footnote"><Icon name="lock" size={14} /> The message body stays on this device. The server stores only the verdict, sender hash and link count.</p>
     </div>;
   }
 
   function renderPage() {
     if (page === 'scan-result') return renderScanResult();
     if (page === 'blocked') return renderBlocked();
+    if (page === 'alert-details') return renderAlertDetails();
     if (['protection', 'notifications', 'privacy', 'subscription', 'account', 'support'].includes(page)) return renderSettingPage();
     if (['message-details', 'blocked-details', 'conversation'].includes(page)) return renderMessageDetail();
     if (page === 'forensics') return <Forensics onBack={goBack} scan={scan} />;
@@ -835,7 +967,7 @@ export default function App() {
       {guardAlert && <div className={`guard-alert-banner ${guardAlert.verdict === 'Dangerous' ? 'danger' : 'warn'}`}>
         <span className="guard-alert-icon"><Icon name="alert" size={18} /></span>
         <span><strong>{guardAlert.verdict === 'Dangerous' ? 'Scam message blocked' : 'Suspicious message detected'}</strong><small>{guardAlert.sender || 'Unknown sender'} · {guardAlert.score}/100 · {guardAlert.ai === 'ok' ? 'AI verified' : 'On-device rules'}</small></span>
-        <button onClick={() => { dismissGuardAlert(); setPage('blocked'); }}>View</button>
+        <button onClick={() => { const item = quarantine.find((entry) => entry.id === guardAlert.id) || guardAlert; dismissGuardAlert(); openAlertDetails(item); }}>View</button>
         <button className="guard-alert-close" aria-label="Dismiss alert" onClick={dismissGuardAlert}>×</button>
       </div>}
       <div className="app-scroll" key={`${tab}-${page}`}>{renderPage()}</div>
