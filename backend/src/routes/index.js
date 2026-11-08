@@ -5,6 +5,8 @@ const healthRoutes = require('./health.routes');
 const checkLinkRouter = require('./checks.routes.checkLink');
 const historyRouter = require('./checks.routes.history');
 const linksRouter = require('./links.routes');
+const scanRouter = require('./scan.routes');
+const alertsRouter = require('./alerts.routes');
 
 const router = Router();
 
@@ -12,5 +14,7 @@ router.use('/health', healthRoutes);
 router.use('/check-link', checkLinkRouter);
 router.use('/history', historyRouter);
 router.use('/links', linksRouter);
+router.use('/scan-message', scanRouter);
+router.use('/alerts', alertsRouter);
 
 module.exports = router;

@@ -11,6 +11,8 @@ public class MainActivity extends BridgeActivity {
         // because the Capacitor bridge is created there and only picks up
         // plugins that were added to the bridge builder beforehand.
         registerPlugin(SmsInboxPlugin.class);
+        registerPlugin(PhishGuardPlugin.class);
         super.onCreate(savedInstanceState);
+        Notifier.ensureChannels(this);
     }
 }

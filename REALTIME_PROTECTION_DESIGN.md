@@ -49,19 +49,19 @@ wording as a competing design.
 ## 1. Feature definition and privacy contract
 
 **One sentence:** while *Real-time scanning* is on, every inbound SMS is
-inspected on-device in milliseconds; messages containing links get their links
-scored by the rule engine **and** Gemini on the server; Dangerous messages are
-quarantined, blocklisted, and alerted; nothing but the URL and a hashed sender
-ever leaves the phone.
+inspected on-device in milliseconds, then the **complete message text** is sent
+for a one-shot rule + Gemini analysis; Dangerous messages are quarantined,
+blocklisted, and alerted. The server never stores the message text, and the
+sender only ever leaves the phone as `sha256(deviceSalt + sender)`.
 
 ### 1.1 Privacy contract
 
 | Data | On device | To backend | To Gemini |
 |---|---|---|---|
-| Full message text | ✅ | ❌ never | ❌ |
-| Sender number | ✅ | ❌ never (only `sha256(sender + ALERT_PEPPER)`) | ❌ |
+| Full message text | ✅ (quarantine body only) | ✅ one-shot scan, **never stored** | ✅ quoted in the prompt |
+| Sender number | ✅ | ❌ never — only `sha256(deviceSalt + sender)` (per-install salt) | ❌ |
 | Quarantine / blocklist indexes | ✅ (SharedPreferences) | ❌ | ❌ |
-| Extracted link | ✅ | ✅ via `/api/scan-message` | ✅ quoted-prompt rule |
+| Extracted link | ✅ | ✅ via `/api/scan-message` (aggregated `urls` row) | ✅ quoted-prompt rule |
 
 ### 1.2 Blocking semantics per `System_Design.md` §8A
 
@@ -79,27 +79,26 @@ Server response also records the event in `alert_events` (sender hash only).
 
 | Action | Path |
 |---|---|
-| ADD | `frontend/android/app/src/main/AndroidManifest.xml` *(edit)* |
+| EDIT | `frontend/android/app/src/main/AndroidManifest.xml` |
 | ADD | `frontend/android/app/src/main/java/com/phishguard/app/SmsReceiver.java` |
 | ADD | `frontend/android/app/src/main/java/com/phishguard/app/PhishGuardStore.java` |
 | ADD | `frontend/android/app/src/main/java/com/phishguard/app/PhishGuardPlugin.java` |
 | ADD | `frontend/android/app/src/main/java/com/phishguard/app/OfflineRules.java` |
 | ADD | `frontend/android/app/src/main/java/com/phishguard/app/Notifier.java` |
 | ADD | `frontend/android/app/src/main/java/com/phishguard/app/GuardApi.java` |
-| ADD | `frontend/android/app/src/main/java/com/phishguard/app/SmsGuardService.java` |
-| ADD | `frontend/src/services/guard/guardBridge.js` |
-| ADD | `frontend/src/services/guard/alertFlow.js` |
-| ADD | `frontend/src/services/guard/backendPreferences.js` |
-| ADD | `frontend/src/components/AlertBanner.jsx` |
-| ADD | `frontend/src/components/AlertDetail.jsx` |
-| ADD | `frontend/src/pages/BlockedScreen.jsx` |
-| ADD | `frontend/src/pages/SetupScreen.jsx` |
-| EDIT | `frontend/src/App.jsx` (pages `blocked`, `setup`, `alert`; settings toggle wiring) |
-| EDIT | `frontend/src/main.jsx` (deep-link boot) |
-| ADD | `backend/src/routes/guards.routes.js` + `backend/src/services/alerts.service.js` |
-| EDIT | `backend/src/app.js` (mount router), `backend/.env.example` |
-| ADD | `backend/db/migrations/003_alerts.sql` *(already present)* |
+| ADD | `frontend/android/app/src/main/res/drawable/ic_shield_alert.xml` |
+| EDIT | `frontend/android/app/src/main/java/com/phishguard/app/MainActivity.java` (register plugin + channels) |
+| ADD | `frontend/src/services/guard.js` |
+| EDIT | `frontend/src/App.jsx` (alert banner, protection toggle, `blocked` page, real stats) |
+| EDIT | `frontend/src/styles.css` (banner / quarantine styles) |
+| ADD | `backend/src/routes/scan.routes.js` + `backend/src/routes/alerts.routes.js` |
+| ADD | `backend/src/services/alerts.service.js` |
+| EDIT | `backend/src/analyzer.js` (`analyzeMessage`, `extractLinks`) |
+| EDIT | `backend/src/rules.json` (`messagePatterns`, `messageNegations`) |
+| EDIT | `backend/src/services/gemini.service.js` (`analyzeMessageWithGemini`) |
+| EDIT | `backend/src/routes/index.js` (mount `/scan-message`, `/alerts`) |
 | EDIT | `backend/scripts/retention.js` (30-day `alert_events` sweep) |
+| ADD | `backend/tests/` cases for message analysis + no-store contract |
 
 ---
 
@@ -187,7 +186,7 @@ private fun ensurePepper(ctx: Context): String = prefs(ALERT_PEPPER) {  // 32 ra
     val current = it.getString(KEY, null) ?: UUID.randomUUID().toString().also { v -> it.put(KEY, v) }
 }
 fun senderHash(ctx: Context, sender: String): String =
-    sha256Hex("$sender|${ensurePepper(ctx)}")            // NEVER send the raw number
+    sha256Hex("${ensurePepper(ctx)}:$sender")            // NEVER send the raw number
 ```
 
 ### 3.5 `SmsReceiver.java` — full implementation (replaces §8A skeleton, same behaviour)
@@ -262,15 +261,15 @@ Methods: `realtimeEnabled()`, `setRealtime(Boolean)`, `isBlocked(senderHash)`,
 
 ```java
 object GuardApi {
-    /** POST {api_url}/api/scan-message  { url, senderHash, linkCount }  (merged DTO) */
-    fun scanMessage(url: String, senderHash: String): Verdict? =
+    /** POST {api_url}/api/scan-message  { text, senderHash } */
+    fun scanMessage(text: String, senderHash: String): Verdict? =
         url.openConnection(token, timeout = HTTP_TIMEOUT_MS).use { resp: 200 -> parse(dto) }
 }
 ```
 
-Response = the **locked check-link DTO** (`backend/README.md`) — `valid`,
-`host`, `score`, `verdict`, `ai`, `signals[{ name, points, detail }]` — so the
-same parse is reused on device as in React (`normalizeResult` logic ported).
+Response = `{ valid, score, verdict, ai, signals[{ name, points, detail }],
+linkCount, alertId }`. The message body is sent once and is not persisted by
+the backend.
 
 ### 3.8 `Notifier.java` — two channels, deep link
 
@@ -285,25 +284,25 @@ Both launch `MainActivity` with extras (`alertId`, `verdict`, `score`,
 
 ```java
 class PhishGuardPlugin : Plugin() {
+    @PluginMethod fun getStatus(call)                 // { enabled, smsPermission, notifications, counts }
     @PluginMethod fun requestPermissions(call)        // RECEIVE_SMS + (API 33+) POST_NOTIFICATIONS
-    @PluginMethod fun checkPermissions(call)          // → { receiveSms, notifications }
-    @PluginMethod fun setRealtimeEnabled(call)        // bool → register/unregister receiver @
-    @PluginMethod fun isRealtimeEnabled(call)
-    @PluginMethod fun getBlocked(call)                // quarantined list JSON
-    @PluginMethod fun unblockSender(call)             // senderHash → §8A A4
-    @PluginMethod fun restore(call)                   // move message out of Blocked screen
-    @PluginMethod fun deleteBlocked(call)
-    @PluginMethod fun setBackendConfig(call)          // { apiUrl, token } → prefs (login/scan hook)
-    @PluginMethod fun getBackendConfig(call)
-    @PluginMethod fun getRecentAlerts(call)           // AlertList/AlertDetail data
-    // events to JS: smsLinkDetected, alertOpened, permissionChanged
+    @PluginMethod fun setRealtimeEnabled(call)        // persists the flag; manifest receiver always registered
+    @PluginMethod fun getQuarantine(call)             // { items: [...] }
+    @PluginMethod fun deleteQuarantine(call)          // { id }
+    @PluginMethod fun restoreQuarantine(call)         // { id } → remove + unblock sender
+    @PluginMethod fun unblockSender(call)             // { senderHash }
+    @PluginMethod fun getLastAlert(call)              // { alert } for the in-app banner
+    @PluginMethod fun clearLastAlert(call)
+    @PluginMethod fun syncSessionToken(call)          // { token } from localStorage
+    @PluginMethod fun setBaseUrl(call)                // { url } override
+    @PluginMethod fun testScan(call)                  // { text } → live /api/scan-message
+    @PluginMethod fun clearProtectionData(call)
 }
 ```
 
-Receiver registration is done at **plugin load** (`onLoad()`) only when
-`realtime_enabled=true` AND `RECEIVE_SMS` is granted; the receiver is also
-manifest-registered (3.1) so the app-killed path still fires — the plugin layer
-de-dupes with `(senderHash, receivedAt)` idempotency.
+The manifest receiver is always registered (app-killed path). When the flag is
+off, `SmsReceiver` returns immediately. Duplicate broadcasts are de-duped with
+`(senderHash, bodyHash)` within 15 s.
 
 ## 4. React layer
 
@@ -379,43 +378,51 @@ Notification tap → MainActivity intent extras → plugin emits alertOpened
 
 ### 5.1 `POST /api/scan-message`
 
-Request (validated: **any extra field → 400**):
+Request (validated):
 
 ```json
-{ "url": "http://free-recharge-jio.xyz/claim", "senderHash": "9f2c…64hex", "linkCount": 2 }
+{ "text": "URGENT: your SBI account will be blocked…", "senderHash": "9f2c…64hex" }
 ```
 
-Response `200` — locked check-link DTO + additive helpers:
+`senderHash` is optional for manual web scans (a constant anonymous digest is
+used), and must be a 64-char hex digest when present. `text` is capped at 4000
+characters. The body is analysed in memory and **never written to disk**.
+
+Response `200`:
 
 ```json
 {
-  "valid": true, "host": "free-recharge-jio.xyz", "score": 92,
-  "verdict": "Dangerous", "ai": "ok",
-  "signals": [ { "name": "Scam keyword", "points": 25, "detail": "Contains: free-recharge" } ],
-  "alertId": 4832                                      // aggressive: alert_events.id
+  "valid": true, "score": 100, "verdict": "Dangerous", "ai": "ok",
+  "signals": [
+    { "name": "Credential request", "points": 35, "detail": "Asks you to share a verification code, PIN or password." },
+    { "name": "Brand mismatch", "points": 40, "detail": "Mentions sbi but the domain does not match its official site." }
+  ],
+  "linkCount": 1,
+  "alertId": 4832
 }
 ```
 
-Processing chain (background design reuses M1/M2 services **unchanged**):
+Processing chain:
 
 ```text
-validate body (3 fields only) → rate limits → urls.service upsert
-→ analyzer(rules.json) → gemini.service → checks.service merge → DTO
-→ alerts.service.recordAlert({user_id?, url_id, senderHash, linkCount,
-    localVerdict?, score, verdict, ai_status, notified:true}) → alertId
+validate body → senderHash rules → analyzer.analyzeMessage(text)
+→ gemini.analyzeMessageWithGemini(text) (daily budget) → merge max(score)
+→ alerts.service.recordAlert({user_id?, url_id?, senderHash, linkCount,
+    localVerdict, score, verdict, ai_status}) → alertId
 ```
 
-Errors: `400` shape/length · `401` bad bearer (when sent) · `422` URL rejected ·
-`429` rate-limited (receiver treats any non-200 as "offline verdict stands").
+Errors: `400` missing text · `413` text too long · `422` invalid senderHash ·
+`429` rate-limited (receiver keeps the offline verdict).
 
 ### 5.2 `GET /api/alerts` 🔒
 
 Last 20 `alert_events` for the token's user, newest first:
 
 ```json
-[ { "id": 4832, "urlHash": "…", "host": "free-recharge-jio.xyz", "score": 92,
-    "verdict": "Dangerous", "ai": "ok", "localVerdict": "Suspicious",
-    "notified": true, "createdAt": "2026-11-05T10:02:11Z" } ]
+{ "alerts": [ { "id": 4832, "host": "free-recharge-jio.xyz", "score": 92,
+    "verdict": "Dangerous", "ai_status": "ok", "local_verdict": "Suspicious",
+    "sender_hash": "9f2c…64hex", "link_count": 1,
+    "notified": 1, "in_app_shown": 0, "created_at": "2026-11-05T10:02:11Z" } ] }
 ```
 
 ### 5.3 Rate limits, cache, queuing (Gemini cost control)
@@ -491,5 +498,6 @@ A5 unblock → next SMS is re-scored fresh (blocklist left, cache purged for sen
 2. `RECEIVE_SMS`+`POST_NOTIFICATIONS` pre-grant matrix on Android 8–14 OEMs.
 3. The `senderLabel` for the quarantine UI is a masked form (e.g. "Unknown
    sender (hash 9f2c…)") to avoid accidental PII leaks in screenshots.
-4. Text-only Gemini scoring — deliberately **out of scope** (privacy §1.1);
-   roadmap: opt-in toggle → §9 of REALTIME_PROT design draft → Gemini Nano/AICore.
+4. Text-only Gemini scoring — **implemented** in `/api/scan-message`
+   (full message text, one-shot, not stored). The on-device rules remain the
+   offline fallback; Gemini Nano/AICore stays a future battery optimisation.

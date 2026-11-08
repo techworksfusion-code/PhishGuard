@@ -122,4 +122,102 @@ function analyze(rawUrl) {
   };
 }
 
-module.exports = { analyze };
+// Bare domains and explicit URLs found in an SMS body. Emails and the
+// domain part of an already-matched URL are skipped to avoid duplicates.
+const LINK_PATTERN = [
+  'https?:\\/\\/[^\\s<>"\']+',
+  'www\\.[^\\s<>"\']+',
+  '(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+(?:com|in|net|org|co|io|xyz|top|tk|ml|cf|gq|click|icu|buzz|work|info|shop|live|online|site|store|app|link|pro|club|vip|cc|ru|cn|me)(?:\\/[^\\s<>"\']*)?',
+].join('|');
+
+function extractLinks(text) {
+  const found = new Map();
+  const re = new RegExp(LINK_PATTERN, 'gi');
+  let match;
+
+  while ((match = re.exec(text)) !== null) {
+    const start = match.index;
+    const prev = start > 0 ? text[start - 1] : '';
+    if (prev === '@' || prev === '/' || /[a-z0-9._-]/i.test(prev)) continue;
+
+    let raw = match[0].replace(/[\s.,;:!?)\]}>"']+$/, '');
+    if (/^www\./i.test(raw)) raw = `http://${raw}`;
+
+    try {
+      const parsed = new URL(raw);
+      if (!['http:', 'https:'].includes(parsed.protocol)) continue;
+      if (!parsed.hostname.includes('.')) continue;
+      const key = `${parsed.hostname.toLowerCase()}${parsed.pathname}${parsed.search}`;
+      if (!found.has(key)) found.set(key, parsed.href);
+    } catch {
+      // Not a real link (e.g. "Rs.500") — ignore.
+    }
+  }
+
+  return Array.from(found.values()).slice(0, 5);
+}
+
+function analyzeMessage(rawText) {
+  const text = String(rawText || '').trim();
+  if (!text) throw new Error('Message is empty');
+
+  const lower = text.toLowerCase();
+  const signals = [];
+  let textScore = 0;
+
+  // Same curated keyword list as the URL engine (minus the URL-only context).
+  const matchedKeywords = rules.keywords.filter((word) => lower.includes(word));
+  if (matchedKeywords.length) {
+    const points = Math.min(matchedKeywords.length * rules.points.scamKeyword, rules.caps.scamKeywordMax);
+    signals.push({ name: 'Scam keyword', points, detail: `Contains: ${matchedKeywords.join(', ')}` });
+    textScore += points;
+  }
+
+  // Full-sentence social-engineering patterns.
+  const negated = (rules.messageNegations || []).some((phrase) => lower.includes(phrase));
+  for (const rule of rules.messagePatterns || []) {
+    if (rule.skipIfNegated && negated) continue;
+    if (new RegExp(rule.pattern, 'i').test(text)) {
+      signals.push({ name: rule.name, points: rule.points, detail: rule.detail });
+      textScore += rule.points;
+    }
+  }
+
+  // Score every link; keep the evidence of the worst one.
+  const links = extractLinks(text);
+  let bestLink = null;
+  for (const link of links) {
+    try {
+      const result = analyze(link);
+      if (!bestLink || result.score > bestLink.score) bestLink = result;
+    } catch {
+      // Ignore malformed extraction.
+    }
+  }
+
+  if (bestLink) {
+    for (const signal of bestLink.signals) {
+      signals.push({ ...signal, detail: `${signal.detail} (link: ${bestLink.host})` });
+    }
+    if (links.length > 1) {
+      signals.push({
+        name: 'Multiple links',
+        points: 5,
+        detail: `${links.length} links found in one message.`,
+      });
+      textScore += 5;
+    }
+  }
+
+  const score = Math.min(rules.caps.maxScore, Math.max(textScore, bestLink ? bestLink.score : 0));
+
+  return {
+    score,
+    signals,
+    links,
+    host: bestLink ? bestLink.host : null,
+    urlHash: bestLink ? bestLink.urlHash : null,
+  };
+}
+
+module.exports = { analyze, analyzeMessage, extractLinks };

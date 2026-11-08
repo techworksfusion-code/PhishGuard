@@ -3,6 +3,7 @@ import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { checkLink, register, requestOtp, verifyOtp as verifyOtpApi, login, logout, getSession, isAuthenticated, getGoogleAuthUrl, exchangeGoogleCode, voteLink, getLinkSummary } from './services/api.js';
 import { fetchInboxMessages, isNativePlatform } from './services/smsInbox.js';
+import { isGuardAvailable, getGuardStatus, requestGuardPermissions, setRealtimeEnabled, getQuarantine, deleteQuarantine, restoreQuarantine, getLastAlert, clearLastAlert, syncSessionToken } from './services/guard.js';
 
 const activitySample = {
   domain: 'secure-account-help.example',
@@ -303,6 +304,10 @@ export default function App() {
   const [upvoted, setUpvoted] = useState(false);
   const [settings, setSettings] = useState({ detection: true, links: true, unknown: true, realtime: true, scamAlerts: true, blockedAlerts: true, privateAnalysis: true, anonymousSharing: false });
   const [googleAuthError, setGoogleAuthError] = useState('');
+  const [guard, setGuard] = useState({ available: false, enabled: false, smsPermission: false, notifications: false, quarantineCount: 0, blockedCount: 0, scannedCount: 0 });
+  const [guardAlert, setGuardAlert] = useState(null);
+  const [quarantine, setQuarantine] = useState([]);
+  const [guardBusy, setGuardBusy] = useState(false);
 
   // "Continue with Google" returns to /auth/google/callback?code=…&state=…
   // Finish the sign-in before anything else is shown.
@@ -426,6 +431,101 @@ export default function App() {
     };
   }, [authStage]);
 
+  // Real-time SMS protection: hydrate native status, sync the session token,
+  // and poll for alerts raised by the background receiver.
+  useEffect(() => {
+    if (authStage !== 'app' || !isGuardAvailable()) return undefined;
+
+    let active = true;
+    let timer;
+
+    async function refreshGuard() {
+      try {
+        const status = await getGuardStatus();
+        if (!active) return;
+        setGuard({ available: true, ...status });
+
+        const currentToken = getTokenFromApi();
+        syncSessionToken(currentToken || '').catch(() => {});
+
+        const items = await getQuarantine();
+        if (active) setQuarantine(items);
+
+        const alert = await getLastAlert();
+        if (active && alert && alert.verdict !== 'Low risk') {
+          setGuardAlert(alert);
+        }
+      } catch {
+        // Plugin not ready yet — retry on the next tick.
+      }
+    }
+
+    refreshGuard();
+    timer = setInterval(refreshGuard, 8000);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [authStage]);
+
+  async function refreshGuardState() {
+    if (!isGuardAvailable()) return;
+    try {
+      const status = await getGuardStatus();
+      setGuard({ available: true, ...status });
+      setQuarantine(await getQuarantine());
+    } catch {
+      // Keep the last known state.
+    }
+  }
+
+  async function toggleRealtime(value) {
+    if (!isGuardAvailable()) {
+      setSettings((current) => ({ ...current, realtime: value }));
+      return;
+    }
+    setGuardBusy(true);
+    setError('');
+    try {
+      if (value) await requestGuardPermissions();
+      const status = await setRealtimeEnabled(value);
+      setGuard({ available: true, ...status });
+      await refreshGuardState();
+    } catch (guardError) {
+      setError(guardError?.message || 'Could not change real-time protection.');
+    } finally {
+      setGuardBusy(false);
+    }
+  }
+
+  async function dismissGuardAlert() {
+    setGuardAlert(null);
+    try {
+      await clearLastAlert();
+    } catch {
+      // Nothing to clear.
+    }
+  }
+
+  async function removeQuarantined(id) {
+    try {
+      await deleteQuarantine(id);
+      await refreshGuardState();
+    } catch {
+      // Leave the item in place so the user can retry.
+    }
+  }
+
+  async function restoreQuarantined(id) {
+    try {
+      await restoreQuarantine(id);
+      await refreshGuardState();
+    } catch {
+      // Leave the item in place so the user can retry.
+    }
+  }
+
   const visibleMessages = useMemo(() => smsMessages.map(toInboxMessage).filter((message) => {
     const matchesSearch = `${message.sender} ${message.text}`.toLowerCase().includes(search.toLowerCase());
     const matchesFilter = filter === 'All' || (filter === 'Unread' && message.unread);
@@ -528,14 +628,15 @@ export default function App() {
         <p className="greeting">Good morning, {account.name.split(' ')[0]} <span className="sun">✳</span></p>
         <h1>Your inbox is in<br />safe hands.</h1>
         <button className="protection-card" onClick={() => setPage('protection')}>
-          <span className="protection-icon"><Icon name="shield" size={24} /></span><span><strong>Protection is active</strong><small>Watching out for you, around the clock.</small></span><Icon name="chevron" size={18} />
+          <span className="protection-icon"><Icon name="shield" size={24} /></span><span><strong>{guard.available && !guard.enabled ? 'Turn on real-time protection' : 'Protection is active'}</strong><small>{guard.available && !guard.enabled ? 'Incoming SMS is not being checked yet.' : 'Watching out for you, around the clock.'}</small></span><Icon name="chevron" size={18} />
         </button>
       </section>
       <div className="home-content">
-        <p className="sample-data-banner"><Icon name="shield" size={15} /> Data synced from your PhishGuard account.</p>
+        <p className="sample-data-banner"><Icon name="shield" size={15} /> {guard.available ? (guard.enabled ? 'Real-time protection is on — live data from this device.' : 'Real-time protection is off — enable it in Protection settings.') : 'Real-time SMS stats are available in the PhishGuard Android app.'}</p>
+        {guard.available && !guard.enabled && <button className="guard-setup-card" onClick={() => setPage('protection')}><span className="guard-setup-icon"><Icon name="shield" size={22} /></span><span><strong>Turn on real-time SMS protection</strong><small>Check every incoming message and warn you instantly.</small></span><Icon name="chevron" size={18} /></button>}
         <div className="stats-grid">
-          <div className="stat-card"><div className="stat-icon"><Icon name="alert" /></div><strong>24</strong><span>Threats blocked</span><small className="preview-data-label">Preview data</small></div>
-          <div className="stat-card"><div className="stat-icon"><Icon name="message" /></div><strong>186</strong><span>Texts checked</span><small className="preview-data-label">Preview data</small></div>
+          <div className="stat-card"><div className="stat-icon"><Icon name="alert" /></div><strong>{guard.available ? guard.quarantineCount : '—'}</strong><span>Threats blocked</span><small className="preview-data-label">{guard.available ? 'On this device' : 'Android app only'}</small></div>
+          <div className="stat-card"><div className="stat-icon"><Icon name="message" /></div><strong>{guard.available ? guard.scannedCount : '—'}</strong><span>Texts checked</span><small className="preview-data-label">{guard.available ? 'On this device' : 'Android app only'}</small></div>
         </div>
         <SectionTitle title="Recent messages" action="See all" onAction={() => openTab('inbox')} />
         <div className="activity-list">
@@ -546,7 +647,7 @@ export default function App() {
           {smsStatus !== 'ready' && <button className="activity-row" onClick={() => openTab('inbox')}><span className="activity-symbol"><Icon name="message" /></span><span><strong>Open your inbox</strong><small>Real messages from your phone appear here in the app.</small></span><Icon name="chevron" size={18} /></button>}
         </div>
         <button className="scan-promo" onClick={() => openTab('scan')}><span className="scan-promo-icon"><Icon name="link" /></span><span><strong>Got a suspicious link?</strong><small>Check it before you tap.</small></span><Icon name="arrow" /></button>
-        <p className="privacy-note"><Icon name="lock" size={14} /> Your messages stay private on your device.</p>
+        <p className="privacy-note"><Icon name="lock" size={14} /> Messages are checked in a one-shot scan and never stored.</p>
       </div>
     </div>;
   }
@@ -569,7 +670,7 @@ export default function App() {
         {smsStatus !== 'loading' && visibleMessages.map((message) => <MessageRow key={message.id} message={message} onClick={(item) => { setSelectedMessage(item); setPage('message-details'); }} />)}
         {smsStatus !== 'loading' && visibleMessages.length === 0 && <p className="empty-state">{smsStatus === 'ready' ? 'No messages match that search.' : 'Your real messages will appear here — open the PhishGuard Android app.'}</p>}
       </div>
-      <div className="inbox-privacy"><Icon name="lock" size={16} /> Message text stays on your device — nothing is uploaded.</div>
+      <div className="inbox-privacy"><Icon name="lock" size={16} /> The message list stays on your phone. Real-time checks send the text once and never store it.</div>
     </div>;
   }
 
@@ -636,10 +737,14 @@ export default function App() {
     const configs = {
       protection: { title: 'Protection settings', intro: "You're all set.", caption: 'Your messages are being checked for threats.', groups: [{ heading: 'MESSAGE PROTECTION', rows: [['detection', 'Scam detection', 'Identify suspicious texts'], ['links', 'Block risky links', 'Warn before opening unsafe links'], ['unknown', 'Filter unknown senders', 'Keep unfamiliar numbers separate']] }, { heading: 'ADVANCED', rows: [['realtime', 'Real-time scanning', 'Check messages as they arrive']] }] },
       notifications: { title: 'Notifications', intro: 'Only the alerts that matter.', caption: "Choose what you want to hear about. You're always in control.", groups: [{ heading: 'SAFETY ALERTS', rows: [['scamAlerts', 'Scam alerts', 'When a suspicious message arrives'], ['blockedAlerts', 'Blocked messages', 'When a threat is stopped']] }] },
-      privacy: { title: 'Privacy', intro: 'Your data. Your rules.', caption: "Privacy isn't an extra feature. It's how PhishGuard works.", groups: [{ heading: 'DATA CONTROLS', rows: [['privateAnalysis', 'Private threat analysis', 'Analyze messages on your device'], ['anonymousSharing', 'Anonymous threat sharing', 'Help protect others without sharing identity']] }] },
+      privacy: { title: 'Privacy', intro: 'Your data. Your rules.', caption: "Privacy isn't an extra feature. It's how PhishGuard works.", groups: [{ heading: 'DATA CONTROLS', rows: [['privateAnalysis', 'Private threat analysis', 'On-device rules plus a one-shot AI check'], ['anonymousSharing', 'Anonymous threat sharing', 'Help protect others without sharing identity']] }] },
     };
     const setting = configs[page];
-    if (setting) return <div className="page-content setting-page"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> {setting.title}</button><div className="setting-hero"><Icon name={page === 'privacy' ? 'lock' : 'shield'} size={34} /><h2>{setting.intro}</h2><p>{setting.caption}</p></div>{setting.groups.map((group) => <div className="setting-group" key={group.heading}><h3>{group.heading}</h3>{group.rows.map(([key, label, caption], index) => <div className="toggle-row" key={`${label}-${index}`}><span><strong>{label}</strong><small>{caption}</small></span><Toggle label={label} checked={settings[key]} onChange={(value) => setSettings((current) => ({ ...current, [key]: value }))} /></div>)}</div>)}<p className="privacy-note"><Icon name="lock" size={14} /> Your messages stay private on your device.</p></div>;
+    if (setting) return <div className="page-content setting-page"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> {setting.title}</button><div className="setting-hero"><Icon name={page === 'privacy' ? 'lock' : 'shield'} size={34} /><h2>{setting.intro}</h2><p>{setting.caption}</p></div>{setting.groups.map((group) => <div className="setting-group" key={group.heading}><h3>{group.heading}</h3>{group.rows.map(([key, label, caption], index) => {
+        const isGuardToggle = key === 'realtime';
+        const checked = isGuardToggle && guard.available ? guard.enabled : settings[key];
+        return <div className="toggle-row" key={`${label}-${index}`}><span><strong>{label}</strong><small>{isGuardToggle && !guard.available ? `${caption} · Android app only` : caption}</small></span><Toggle label={label} checked={checked} onChange={(value) => { if (isGuardToggle) { toggleRealtime(value); } else { setSettings((current) => ({ ...current, [key]: value })); } }} /></div>;
+      })}</div>)}{page === 'protection' && guard.available && <div className="setting-group"><h3>BLOCKED MESSAGES</h3><p className="guard-count-line">{guard.smsPermission ? `${guard.quarantineCount} messages quarantined on this device${guard.blockedCount ? ` · ${guard.blockedCount} senders blocked` : ''}` : 'SMS permission is off. Turn on real-time scanning to check incoming messages.'}</p>{!guard.smsPermission && <button className="primary-button" onClick={async () => { try { await requestGuardPermissions(); await refreshGuardState(); } catch { /* user can retry */ } }}>Allow SMS access</button>}<button className="outline-button" onClick={async () => { await refreshGuardState(); setPage('blocked'); }}>View blocked messages <Icon name="arrow" size={18} /></button></div>}{guardBusy && <p className="sample-data-banner"><Icon name="shield" size={15} /> Updating protection…</p>}{error && <p className="form-error" role="alert">{error}</p>}<p className="privacy-note"><Icon name="lock" size={14} /> The inbox list stays on your phone; analysis text is never stored.</p></div>;
     if (page === 'subscription') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Subscription</button><p className="subheading">A simple look at what an expanded plan could include.</p><div className="plan-card"><small>CURRENT PLAN</small><strong>Essential <span>ACTIVE</span></strong><p>Core message and link checks</p></div><h3 className="section-label">PhishGuard Plus</h3>{['Deeper protection', 'Detailed link investigations', 'Domain and registrar context', 'Extended activity history'].map((item) => <div className="plan-feature" key={item}><Icon name="check" size={17} />{item}</div>)}<p className="sample-note">Concept only · no price or billing is available.</p><button className="disabled-button" disabled>Coming soon</button></div>;
     if (page === 'account') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Account</button><div className="setting-hero"><span className="profile-avatar large">{account.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</span><h2>{account.name}</h2><p>{account.email}</p></div><button className="outline-button sign-out-button" onClick={async () => { await logout(); setAuthStage('welcome'); }}>Sign out</button><p className="inbox-privacy">Your account is managed by the PhishGuard backend.</p></div>;
     if (page === 'support') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Support</button><SectionTitle title="How can we help?" /><div className="support-card"><Icon name="help" /><strong>Stay safe online</strong><p>Never open unexpected links or share passwords and OTPs over messages.</p></div></div>;
@@ -654,8 +759,31 @@ export default function App() {
     return <div className="page-content message-details"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> {title}</button><div className={`detail-alert ${page === 'blocked-details' ? 'danger' : 'safe'}`}><span className="result-icon"><Icon name={page === 'blocked-details' ? 'alert' : 'shield'} size={30} /></span><p className="eyebrow">{page === 'blocked-details' ? 'HIGH RISK DETECTED' : 'SAFETY CHECK COMPLETE'}</p><h2>{page === 'blocked-details' ? 'Pause before you tap.' : 'Looks safe to us.'}</h2><p>{page === 'blocked-details' ? 'This message shows signs of a phishing attempt.' : 'No suspicious patterns were found in this message.'}</p></div><div className="content-section"><h3>{page === 'blocked-details' ? 'Flagged message' : 'Message'}</h3><div className="captured-message"><strong>{message.sender}</strong><p>{message.text}</p><small>Today · {message.time}</small></div></div><div className="content-section"><h3>What we checked</h3>{['Sender identity', 'Suspicious links', 'Language patterns'].map((item) => <div className="signal-row" key={item}><Icon name="check" size={18} /><strong>{item}</strong></div>)}</div><button className="primary-button" onClick={() => openTab('inbox')}>Back to inbox <Icon name="arrow" size={18} /></button></div>;
   }
 
+  function renderBlocked() {
+    return <div className="page-content">
+      <button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Blocked messages</button>
+      <SectionTitle eyebrow="REAL-TIME PROTECTION" title="Quarantined SMS" />
+      <p className="subheading">Dangerous messages caught on this device. The system Messages app may still show the original SMS.</p>
+      {!guard.available && <p className="sample-data-banner"><Icon name="shield" size={15} /> Quarantine is available in the PhishGuard Android app.</p>}
+      {guard.available && !guard.smsPermission && <button className="primary-button" onClick={async () => { try { await requestGuardPermissions(); await refreshGuardState(); } catch { /* retry */ } }}>Allow SMS access</button>}
+      <div className="guard-list">
+        {quarantine.map((item) => <article className="guard-item" key={item.id}>
+          <div className="guard-item-head"><strong>{item.sender || 'Unknown sender'}</strong><span className={`risk-label ${item.verdict === 'Dangerous' ? 'dangerous' : 'suspicious'}`}>{item.verdict}</span></div>
+          <p>{item.body}</p>
+          <small>{item.score}/100 · {item.ai === 'ok' ? 'AI + rules' : 'On-device rules'} · {item.createdAt ? new Date(item.createdAt).toLocaleString() : 'Just now'}</small>
+          <div className="guard-item-actions">
+            <button onClick={() => restoreQuarantined(item.id)}>Restore &amp; unblock</button>
+            <button onClick={() => removeQuarantined(item.id)}>Delete</button>
+          </div>
+        </article>)}
+        {guard.available && quarantine.length === 0 && <p className="empty-state">No blocked messages yet. Incoming SMS is checked automatically when real-time protection is on.</p>}
+      </div>
+    </div>;
+  }
+
   function renderPage() {
     if (page === 'scan-result') return renderScanResult();
+    if (page === 'blocked') return renderBlocked();
     if (['protection', 'notifications', 'privacy', 'subscription', 'account', 'support'].includes(page)) return renderSettingPage();
     if (['message-details', 'blocked-details', 'conversation'].includes(page)) return renderMessageDetail();
     if (page === 'forensics') return <Forensics onBack={goBack} scan={scan} />;
@@ -680,6 +808,12 @@ export default function App() {
     </aside>
     <div className="app-main">
       <header className="desktop-topbar"><Brand compact /><span className="topbar-status"><i /> Protection active</span><button className="icon-button" aria-label="Open profile" onClick={() => openTab('profile')}><Icon name="user" /></button></header>
+      {guardAlert && <div className={`guard-alert-banner ${guardAlert.verdict === 'Dangerous' ? 'danger' : 'warn'}`}>
+        <span className="guard-alert-icon"><Icon name="alert" size={18} /></span>
+        <span><strong>{guardAlert.verdict === 'Dangerous' ? 'Scam message blocked' : 'Suspicious message detected'}</strong><small>{guardAlert.sender || 'Unknown sender'} · {guardAlert.score}/100 · {guardAlert.ai === 'ok' ? 'AI verified' : 'On-device rules'}</small></span>
+        <button onClick={() => { dismissGuardAlert(); setPage('blocked'); }}>View</button>
+        <button className="guard-alert-close" aria-label="Dismiss alert" onClick={dismissGuardAlert}>×</button>
+      </div>}
       <div className="app-scroll" key={`${tab}-${page}`}>{renderPage()}</div>
       <nav className="bottom-nav" aria-label="Primary navigation">{[...navItems, { id: 'profile', label: 'Profile', icon: 'user' }].map((item) => <button key={item.id} className={`${tab === item.id && !page ? 'active' : ''}`} onClick={() => openTab(item.id)}><Icon name={item.icon} size={20} /><span>{item.label}</span></button>)}</nav>
       <div className="home-indicator" />

@@ -28,5 +28,58 @@
   "caps": {
     "scamKeywordMax": 50,
     "maxScore": 100
-  }
+  },
+  "messagePatterns": [
+    {
+      "name": "Credential request",
+      "pattern": "(share|send|provide|tell|reply with|verify|confirm|enter)[^\\n]{0,40}(otp|one[- ]time password|pin\\b|password|cvv|card number)",
+      "points": 35,
+      "detail": "Asks you to share a verification code, PIN or password.",
+      "skipIfNegated": true
+    },
+    {
+      "name": "Account threat",
+      "pattern": "(account|card|sim|kyc|service)[^\\n]{0,40}(blocked|suspended|deactivated|expired|frozen|closed|disconnected)",
+      "points": 30,
+      "detail": "Threatens that your account, SIM or KYC will be blocked."
+    },
+    {
+      "name": "Prize or lottery lure",
+      "pattern": "(won|winner|lottery|lucky draw|prize money|cash reward|gift worth)",
+      "points": 25,
+      "detail": "Claims you won a prize or lottery."
+    },
+    {
+      "name": "Urgency pressure",
+      "pattern": "(urgent|immediately|within (24|48) hours|last chance|act now|expires today|final warning)",
+      "points": 15,
+      "detail": "Uses urgency to rush you into acting."
+    },
+    {
+      "name": "Payment request",
+      "pattern": "(send|transfer|pay)[^\\n]{0,25}(money|rs\\.?\\s*\\d|inr|₹)|upi id|gpay|google pay|phonepe|scan this qr",
+      "points": 25,
+      "detail": "Asks for a money transfer or UPI payment."
+    },
+    {
+      "name": "KYC or refund lure",
+      "pattern": "(kyc|recharge|refund|cashback)[^\\n]{0,30}(update|complete|verify|claim|pending|failed)",
+      "points": 25,
+      "detail": "Uses a KYC, recharge or refund story to lure you."
+    },
+    {
+      "name": "Link request",
+      "pattern": "(click|open|visit)[^\\n]{0,25}(link|here|below)",
+      "points": 10,
+      "detail": "Pushes you to click a link."
+    }
+  ],
+  "messageNegations": [
+    "do not share",
+    "don't share",
+    "never share",
+    "do not disclose",
+    "never disclose",
+    "do not reveal"
+  ]
 }

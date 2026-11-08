@@ -512,3 +512,27 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fb4c0080; outlin
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* ------------------------------------------------ real-time SMS protection */
+.guard-alert-banner { display: flex; align-items: center; gap: 10px; margin: 10px 16px 0; padding: 11px 12px; border-radius: 10px; border: 1px solid #f1b6a4; background: var(--red-wash); color: var(--red); }
+.guard-alert-banner.warn { border-color: #f0d49a; background: #fff7e6; color: #8a5a00; }
+.guard-alert-icon { display: grid; place-items: center; flex: 0 0 auto; }
+.guard-alert-banner > span:nth-child(2) { flex: 1; display: grid; gap: 3px; min-width: 0; }
+.guard-alert-banner strong { font-size: 11px; }
+.guard-alert-banner small { font-size: 9px; color: inherit; opacity: .82; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guard-alert-banner button { border: 0; background: transparent; font-size: 10px; font-weight: 800; color: inherit; cursor: pointer; }
+.guard-alert-close { font-size: 17px !important; line-height: 1; padding: 0 3px; }
+.guard-setup-card { width: 100%; display: flex; align-items: center; gap: 11px; margin: 0 0 14px; padding: 12px; text-align: left; border: 1px solid #c9d9c7; border-radius: 10px; background: var(--green); color: var(--ink); cursor: pointer; }
+.guard-setup-icon { display: grid; place-items: center; flex: 0 0 auto; height: 38px; width: 38px; border-radius: 50%; background: #fff; color: #2f6b3f; }
+.guard-setup-card > span:nth-child(2) { flex: 1; display: grid; gap: 3px; }
+.guard-setup-card strong { font-size: 11px; }
+.guard-setup-card small { color: #4f6656; font-size: 9px; line-height: 1.4; }
+.guard-count-line { margin: 0 0 10px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.guard-list { display: grid; gap: 10px; margin-top: 14px; }
+.guard-item { display: grid; gap: 7px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.guard-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.guard-item-head strong { font-size: 11px; }
+.guard-item p { margin: 0; color: #3a4a41; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.guard-item small { color: var(--muted); font-size: 9px; }
+.guard-item-actions { display: flex; gap: 8px; }
+.guard-item-actions button { flex: 1; min-height: 32px; border: 1px solid var(--line); border-radius: 6px; background: #f7f8f2; font-size: 9px; font-weight: 700; cursor: pointer; }

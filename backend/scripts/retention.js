@@ -43,6 +43,11 @@ const RULES = [
     label: 'gemini_usage (> 7 days)',
     sql: `DELETE FROM gemini_usage
           WHERE day < strftime('%Y-%m-%d', 'now', '-7 days')`
+  },
+  {
+    label: 'alert_events (> 30 days)',
+    sql: `DELETE FROM alert_events
+          WHERE created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')`
   }
   // urls, threat_votes and the url_threat_stats view are kept:
   // aggregated, non-personal data (BACKEND_DESIGN.md §2.4).
