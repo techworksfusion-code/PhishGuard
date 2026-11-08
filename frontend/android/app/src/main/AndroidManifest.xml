@@ -38,4 +38,6 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- SMS inbox display (Messages tab). Nothing is uploaded anywhere. -->
+    <uses-permission android:name="android.permission.READ_SMS" />
 </manifest>

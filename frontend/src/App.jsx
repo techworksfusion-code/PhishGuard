@@ -2,14 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { checkLink, register, requestOtp, verifyOtp as verifyOtpApi, login, logout, getSession, isAuthenticated, getGoogleAuthUrl, exchangeGoogleCode, voteLink, getLinkSummary } from './services/api.js';
-
-const sampleMessages = [
-  { id: 1, sender: 'Mom', initials: 'M', time: '10:34', text: "Don't forget dinner at 7 tonight!", kind: 'safe', unread: true },
-  { id: 2, sender: 'Bright Bank', initials: 'B', time: '09:18', text: 'Your monthly statement is ready.', kind: 'safe', verified: true },
-  { id: 3, sender: 'Unknown sender', initials: '?', time: 'Today', text: 'URGENT: Verify your account at secure-account-help.example', kind: 'danger', blocked: true },
-  { id: 4, sender: 'Nora Chen', initials: 'N', time: 'Yesterday', text: 'That sounds great, see you there.', kind: 'safe' },
-  { id: 5, sender: 'Delivery updates', initials: 'D', time: 'Yesterday', text: 'Your parcel is on the way.', kind: 'safe' },
-];
+import { fetchInboxMessages, isNativePlatform } from './services/smsInbox.js';
 
 const activitySample = {
   domain: 'secure-account-help.example',
@@ -247,6 +240,36 @@ function SectionTitle({ eyebrow, title, action, actionLabel, onAction }) {
   return <div className="section-heading">{eyebrow && <p className="eyebrow">{eyebrow}</p>}<div className="section-title-row"><h2>{title}<span className="brand-dot">.</span></h2>{action && <button type="button" className="text-action" aria-label={actionLabel} onClick={onAction}>{action}{typeof action === 'string' && <Icon name="arrow" size={16} />}</button>}</div></div>;
 }
 
+// ---------- Real device SMS helpers ----------
+// Mapping from the native plugin payload into the shape the UI renders.
+
+function formatSmsTime(timestamp) {
+  const date = new Date(Number(timestamp));
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (date.toDateString() === now.toDateString()) return time;
+  if (now.getTime() - date.getTime() < 7 * 24 * 60 * 60 * 1000) {
+    return date.toLocaleDateString([], { weekday: 'short' });
+  }
+  return date.toLocaleDateString([], { day: 'numeric', month: 'short' });
+}
+
+function toInboxMessage(sms, index) {
+  const sender = String(sms.sender || 'Unknown sender').trim() || 'Unknown sender';
+  const derived = sender.replace(/[^A-Za-z\d]/g, '').slice(0, 2).toUpperCase();
+  return {
+    id: `${sms.id || 'sms'}-${index}`,
+    sender,
+    initials: derived || '··',
+    time: formatSmsTime(sms.date),
+    text: String(sms.body || ''),
+    // Real messages have no verdict yet — neutral presentation.
+    kind: 'safe',
+    unread: sms.read === false,
+  };
+}
+
 function MessageRow({ message, onClick }) {
   return <button className="message-row" onClick={() => onClick(message)}>
     <span className={`avatar ${message.kind === 'danger' ? 'avatar-danger' : ''}`}>{message.initials}</span>
@@ -273,6 +296,9 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [selectedMessage, setSelectedMessage] = useState(null);
+  const [smsMessages, setSmsMessages] = useState([]);      // real device SMS
+  const [smsStatus, setSmsStatus] = useState('idle');      // idle | loading | ready | denied | unavailable
+  const [smsError, setSmsError] = useState('');
   const [history, setHistory] = useState([]);
   const [upvoted, setUpvoted] = useState(false);
   const [settings, setSettings] = useState({ detection: true, links: true, unknown: true, realtime: true, scamAlerts: true, blockedAlerts: true, privateAnalysis: true, anonymousSharing: false });
@@ -400,11 +426,39 @@ export default function App() {
     };
   }, [authStage]);
 
-  const visibleMessages = useMemo(() => sampleMessages.filter((message) => {
+  const visibleMessages = useMemo(() => smsMessages.map(toInboxMessage).filter((message) => {
     const matchesSearch = `${message.sender} ${message.text}`.toLowerCase().includes(search.toLowerCase());
-    const matchesFilter = filter === 'All' || (filter === 'Unread' && message.unread) || (filter === 'Blocked' && message.blocked);
+    const matchesFilter = filter === 'All' || (filter === 'Unread' && message.unread);
     return matchesSearch && matchesFilter;
-  }), [search, filter]);
+  }), [smsMessages, search, filter]);
+
+  async function loadInbox() {
+    if (!isNativePlatform()) {
+      setSmsStatus('unavailable');
+      return;
+    }
+    setSmsStatus('loading');
+    setSmsError('');
+    try {
+      const list = await fetchInboxMessages({ limit: 200 });
+      setSmsMessages(list);
+      setSmsStatus('ready');
+    } catch (smsLoadError) {
+      if (/PERMISSION_DENIED/i.test(smsLoadError?.message || '')) {
+        setSmsStatus('denied');
+      } else {
+        setSmsStatus('unavailable');
+        setSmsError(smsLoadError?.message || 'Could not read the SMS inbox.');
+      }
+    }
+  }
+
+  // Load (or refresh) the inbox whenever the Messages tab opens.
+  useEffect(() => {
+    if (authStage !== 'app' || tab !== 'inbox') return undefined;
+    loadInbox();
+    return undefined;
+  }, [authStage, tab]);
 
   if (authStage !== 'app') {
     return <AuthFlow
@@ -483,10 +537,13 @@ export default function App() {
           <div className="stat-card"><div className="stat-icon"><Icon name="alert" /></div><strong>24</strong><span>Threats blocked</span><small className="preview-data-label">Preview data</small></div>
           <div className="stat-card"><div className="stat-icon"><Icon name="message" /></div><strong>186</strong><span>Texts checked</span><small className="preview-data-label">Preview data</small></div>
         </div>
-        <SectionTitle title="Recent activity" action="See all" onAction={() => openTab('activity')} />
+        <SectionTitle title="Recent messages" action="See all" onAction={() => openTab('inbox')} />
         <div className="activity-list">
-          <button className="activity-row" onClick={() => { setSelectedMessage(sampleMessages[2]); setPage('message-details'); }}><span className="activity-symbol danger"><Icon name="alert" /></span><span><strong>Suspicious link blocked</strong><small>Today · 9:42 AM</small></span><Icon name="chevron" size={18} /></button>
-          <button className="activity-row" onClick={() => setPage('message-details')}><span className="activity-symbol"><Icon name="shield" /></span><span><strong>Message marked safe</strong><small>Yesterday · 4:18 PM</small></span><Icon name="chevron" size={18} /></button>
+          {smsStatus === 'ready' && smsMessages.slice(0, 2).map((sms, index) => {
+            const row = toInboxMessage(sms, index);
+            return <button className="activity-row" key={row.id} onClick={() => { setSelectedMessage(row); setPage('message-details'); }}><span className="activity-symbol"><Icon name="message" /></span><span><strong>{row.sender}</strong><small>{row.time} · {row.text.slice(0, 48)}{row.text.length > 48 ? '…' : ''}</small></span><Icon name="chevron" size={18} /></button>;
+          })}
+          {smsStatus !== 'ready' && <button className="activity-row" onClick={() => openTab('inbox')}><span className="activity-symbol"><Icon name="message" /></span><span><strong>Open your inbox</strong><small>Real messages from your phone appear here in the app.</small></span><Icon name="chevron" size={18} /></button>}
         </div>
         <button className="scan-promo" onClick={() => openTab('scan')}><span className="scan-promo-icon"><Icon name="link" /></span><span><strong>Got a suspicious link?</strong><small>Check it before you tap.</small></span><Icon name="arrow" /></button>
         <p className="privacy-note"><Icon name="lock" size={14} /> Your messages stay private on your device.</p>
@@ -495,14 +552,24 @@ export default function App() {
   }
 
   function renderInbox() {
+    const statusBanners = {
+      loading: <p className="sample-data-banner"><Icon name="shield" size={15} /> Reading your messages…</p>,
+      ready: <p className="sample-data-banner"><Icon name="shield" size={15} /> {smsMessages.length} messages from your device · stays on your phone.</p>,
+      denied: <p className="sample-data-banner"><Icon name="lock" size={15} /> PhishGuard needs permission to read SMS.</p>,
+      unavailable: <p className="sample-data-banner"><Icon name="shield" size={15} /> Your SMS inbox is available in the PhishGuard Android app{smsError ? ` (${smsError})` : ''}.</p>,
+    };
     return <div className="page-content">
-      <SectionTitle eyebrow="MESSAGES" title="Your inbox" action={<Icon name="search" />} actionLabel="Focus message search" onAction={() => document.querySelector('.search-input')?.focus()} />
-      <p className="sample-data-banner"><Icon name="shield" size={15} /> Messages synced from your PhishGuard account.</p>
+      <SectionTitle eyebrow="MESSAGES" title="Your inbox" action="Refresh" onAction={() => loadInbox()} />
+      {statusBanners[smsStatus]}
+      {smsStatus === 'denied' && <button className="primary-button" onClick={() => loadInbox()}>Allow SMS access</button>}
       <label className="search-box"><Icon name="search" size={18} /><input className="search-input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search messages" /></label>
-      <div className="filter-tabs">{['All', 'Unread', 'Blocked'].map((value) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{value}{value === 'Blocked' && <span className="filter-count">1</span>}</button>)}</div>
-      <p className="list-label">Today <span className="new-pill">2 NEW</span></p>
-      <div className="message-list">{visibleMessages.map((message) => <MessageRow key={message.id} message={message} onClick={(item) => { setSelectedMessage(item); setPage(item.blocked ? 'blocked-details' : 'conversation'); }} />)}{visibleMessages.length === 0 && <p className="empty-state">No messages match that search.</p>}</div>
-      <div className="inbox-privacy"><Icon name="lock" size={16} /> Message checks happen privately on your device.</div>
+      <div className="filter-tabs">{['All', 'Unread'].map((value) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{value}</button>)}</div>
+      <div className="message-list">
+        {smsStatus === 'loading' && <p className="empty-state">Reading your messages…</p>}
+        {smsStatus !== 'loading' && visibleMessages.map((message) => <MessageRow key={message.id} message={message} onClick={(item) => { setSelectedMessage(item); setPage('message-details'); }} />)}
+        {smsStatus !== 'loading' && visibleMessages.length === 0 && <p className="empty-state">{smsStatus === 'ready' ? 'No messages match that search.' : 'Your real messages will appear here — open the PhishGuard Android app.'}</p>}
+      </div>
+      <div className="inbox-privacy"><Icon name="lock" size={16} /> Message text stays on your device — nothing is uploaded.</div>
     </div>;
   }
 
@@ -580,7 +647,8 @@ export default function App() {
   }
 
   function renderMessageDetail() {
-    const message = selectedMessage || sampleMessages[2];
+    if (!selectedMessage) return renderInbox();
+    const message = selectedMessage;
     if (page === 'conversation') return <div className="page-content conversation-page"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> {message.sender}</button><p className="conversation-date">TODAY, {message.time} AM</p><div className="chat-bubble">{message.text}</div><div className="chat-bubble outgoing">Thanks, got it.</div><div className="safe-conversation"><Icon name="shield" size={16} /> No risks detected in this conversation</div><div className="fake-composer">Write a message... <span><Icon name="arrow" size={18} /></span></div></div>;
     const title = page === 'message-details' ? 'Message details' : 'Blocked sender';
     return <div className="page-content message-details"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> {title}</button><div className={`detail-alert ${page === 'blocked-details' ? 'danger' : 'safe'}`}><span className="result-icon"><Icon name={page === 'blocked-details' ? 'alert' : 'shield'} size={30} /></span><p className="eyebrow">{page === 'blocked-details' ? 'HIGH RISK DETECTED' : 'SAFETY CHECK COMPLETE'}</p><h2>{page === 'blocked-details' ? 'Pause before you tap.' : 'Looks safe to us.'}</h2><p>{page === 'blocked-details' ? 'This message shows signs of a phishing attempt.' : 'No suspicious patterns were found in this message.'}</p></div><div className="content-section"><h3>{page === 'blocked-details' ? 'Flagged message' : 'Message'}</h3><div className="captured-message"><strong>{message.sender}</strong><p>{message.text}</p><small>Today · {message.time}</small></div></div><div className="content-section"><h3>What we checked</h3>{['Sender identity', 'Suspicious links', 'Language patterns'].map((item) => <div className="signal-row" key={item}><Icon name="check" size={18} /><strong>{item}</strong></div>)}</div><button className="primary-button" onClick={() => openTab('inbox')}>Back to inbox <Icon name="arrow" size={18} /></button></div>;
