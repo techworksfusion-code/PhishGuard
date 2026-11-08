@@ -36,6 +36,15 @@ public class SmsInboxPlugin extends Plugin {
 
     @PluginMethod
     public void list(final PluginCall call) {
+        if (call == null) {
+            return;
+        }
+
+        if (getContext() == null) {
+            runOnUi(() -> call.reject("The Android context is not available.", "CONTEXT_UNAVAILABLE"));
+            return;
+        }
+
         if (getPermissionState(READ_SMS_ALIAS) != PermissionState.GRANTED) {
             requestPermissionForAlias(READ_SMS_ALIAS, call, "readSmsPermissionCallback");
             return;
@@ -45,6 +54,9 @@ public class SmsInboxPlugin extends Plugin {
 
     @PermissionCallback
     private void readSmsPermissionCallback(PluginCall call) {
+        if (call == null) {
+            return;
+        }
         if (getPermissionState(READ_SMS_ALIAS) == PermissionState.GRANTED) {
             loadInbox(call);
         } else {
@@ -53,7 +65,11 @@ public class SmsInboxPlugin extends Plugin {
     }
 
     private void loadInbox(final PluginCall call) {
-        final int limit = Math.max(1, call.getInt("limit", 200));
+        if (call == null || getContext() == null) {
+            return;
+        }
+
+        final int limit = Math.max(1, Math.min(500, call.getInt("limit", 200)));
 
         // Content provider queries must not block the main thread.
         new Thread(() -> {
@@ -74,7 +90,14 @@ public class SmsInboxPlugin extends Plugin {
 
     private List<JSObject> readMessages(int limit) {
         List<JSObject> rows = new ArrayList<>();
+        if (getContext() == null) {
+            return rows;
+        }
+
         ContentResolver resolver = getContext().getContentResolver();
+        if (resolver == null) {
+            return rows;
+        }
 
         String[] projection = {
             Telephony.Sms._ID,
@@ -84,12 +107,13 @@ public class SmsInboxPlugin extends Plugin {
             Telephony.Sms.READ
         };
 
+        String orderBy = Telephony.Sms.DATE + " DESC LIMIT " + limit;
         Cursor cursor = resolver.query(
             Telephony.Sms.CONTENT_URI,
             projection,
             null,
             null,
-            Telephony.Sms.DATE + " DESC LIMIT " + limit
+            orderBy
         );
 
         if (cursor == null) {
