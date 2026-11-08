@@ -15,8 +15,6 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
-import org.json.JSONException;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -24,6 +22,10 @@ import java.util.List;
  * SmsInboxPlugin — reads the device SMS inbox for display inside
  * PhishGuard's Messages tab. Message bodies stay ON THE DEVICE: this
  * plugin only reads; it never uploads SMS content anywhere.
+ *
+ * <p>All {@link PluginCall} resolve/reject calls are marshalled back to
+ * the main UI thread because Capacitor expects plugin results on the
+ * thread that received the call.
  */
 @CapacitorPlugin(name = "SmsInbox", permissions = {
     @Permission(strings = { Manifest.permission.READ_SMS }, alias = "readSms")
@@ -46,35 +48,32 @@ public class SmsInboxPlugin extends Plugin {
         if (getPermissionState(READ_SMS_ALIAS) == PermissionState.GRANTED) {
             loadInbox(call);
         } else {
-            call.reject("READ_SMS permission was denied.", "PERMISSION_DENIED");
+            runOnUi(() -> call.reject("READ_SMS permission was denied.", "PERMISSION_DENIED"));
         }
     }
 
     private void loadInbox(final PluginCall call) {
-        final int limit = call.getInt("limit", 200);
+        final int limit = Math.max(1, call.getInt("limit", 200));
 
-        // Querying content providers on the main thread freezes the UI — offload it.
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    List<JSObject> rows = readMessages(limit);
-                    JSArray messages = new JSArray();
-                    for (JSObject row : rows) {
-                        messages.put(row);
-                    }
-                    JSObject result = new JSObject();
-                    result.put("messages", messages);
-                    call.resolve(result);
-                } catch (Exception e) {
-                    call.reject("Could not read the SMS inbox: " + e.getMessage(), "READ_ERROR");
+        // Content provider queries must not block the main thread.
+        new Thread(() -> {
+            try {
+                List<JSObject> rows = readMessages(limit);
+                JSArray messages = new JSArray();
+                for (JSObject row : rows) {
+                    messages.put(row);
                 }
+                JSObject result = new JSObject();
+                result.put("messages", messages);
+                runOnUi(() -> call.resolve(result));
+            } catch (Exception e) {
+                runOnUi(() -> call.reject("Could not read the SMS inbox: " + e.getMessage(), "READ_ERROR"));
             }
         }).start();
     }
 
     private List<JSObject> readMessages(int limit) {
-        List<JSObject> rows = new ArrayList<JSObject>();
+        List<JSObject> rows = new ArrayList<>();
         ContentResolver resolver = getContext().getContentResolver();
 
         String[] projection = {
@@ -90,7 +89,7 @@ public class SmsInboxPlugin extends Plugin {
             projection,
             null,
             null,
-            Telephony.Sms.DATE + " DESC LIMIT " + Math.max(1, limit)
+            Telephony.Sms.DATE + " DESC LIMIT " + limit
         );
 
         if (cursor == null) {
@@ -98,15 +97,19 @@ public class SmsInboxPlugin extends Plugin {
         }
 
         try {
+            int idIdx = cursor.getColumnIndexOrThrow(Telephony.Sms._ID);
+            int addrIdx = cursor.getColumnIndexOrThrow(Telephony.Sms.ADDRESS);
+            int bodyIdx = cursor.getColumnIndexOrThrow(Telephony.Sms.BODY);
+            int dateIdx = cursor.getColumnIndexOrThrow(Telephony.Sms.DATE);
+            int readIdx = cursor.getColumnIndexOrThrow(Telephony.Sms.READ);
+
             while (cursor.moveToNext() && rows.size() < limit) {
-                int dateIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.DATE);
-                int readIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.READ);
                 JSObject row = new JSObject();
-                row.put("id", cursor.getString(cursor.getColumnIndexOrThrow(Telephony.Sms._ID)));
-                row.put("sender", orPlaceholder(cursor, cursor.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)));
-                row.put("body", safeString(cursor, cursor.getColumnIndexOrThrow(Telephony.Sms.BODY)));
-                row.put("date", cursor.getLong(dateIndex));
-                row.put("read", cursor.getInt(readIndex) == 1);
+                row.put("id", safeString(cursor, idIdx));
+                row.put("sender", orPlaceholder(cursor, addrIdx));
+                row.put("body", safeString(cursor, bodyIdx));
+                row.put("date", cursor.getLong(dateIdx));
+                row.put("read", cursor.getInt(readIdx) == 1);
                 rows.add(row);
             }
         } finally {
@@ -128,5 +131,14 @@ public class SmsInboxPlugin extends Plugin {
             return "Unknown sender";
         }
         return value;
+    }
+
+    /** Marshals a runnable onto the main UI thread so Capacitor call results are delivered safely. */
+    private void runOnUi(Runnable action) {
+        if (getActivity() != null) {
+            getActivity().runOnUiThread(action);
+        } else {
+            action.run();
+        }
     }
 }
