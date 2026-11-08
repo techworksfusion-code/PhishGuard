@@ -12,6 +12,9 @@ function resolveDbPath(databaseUrl) {
     throw new Error(`Invalid DATABASE_URL: ${databaseUrl}. Expected sqlite://./path/to/db`);
   }
   const dbPath = match[1];
+  if (dbPath === ':memory:') {
+    return ':memory:';
+  }
   const absolute = path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath);
   const dir = path.dirname(absolute);
   if (!fs.existsSync(dir)) {

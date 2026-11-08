@@ -37,10 +37,9 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
     host: parsed.host,
   });
 
-  let aiResult = { status: 'unavailable', score: 0, signals: [] };
-  if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here') {
-    aiResult = await analyzeWithGemini(parsed.normalized);
-  }
+  // The service enforces the GEMINI_DAILY_MAX budget before any network call;
+  // when it is exhausted (or the key is absent/invalid) we keep the rule verdict.
+  const aiResult = await analyzeWithGemini(parsed.normalized);
 
   const ruleScore = ruleResult.score;
   const aiScore = aiResult.status === 'ok' ? aiResult.score : 0;
@@ -48,10 +47,18 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
   const verdict = verdictFromScore(finalScore);
 
   const allSignals = [...ruleResult.signals];
-  if (aiResult.status === 'ok' && aiResult.signals && aiResult.signals.length) {
-    allSignals.push(...aiResult.signals.map((s) => ({ name: s.name || 'AI check', points: s.points || 0, detail: s.detail || '' })));
+  if (aiResult.status === 'ok') {
+    if (aiResult.signals.length) {
+      allSignals.push(...aiResult.signals);
+    }
   } else {
-    allSignals.push({ name: 'AI check', points: aiScore, detail: 'Imitates a telecom recharge offer' });
+    allSignals.push({
+      name: 'AI check',
+      points: 0,
+      detail: aiResult.reason === 'daily_cap'
+        ? 'AI budget reached for today — rules-only result'
+        : 'AI analysis unavailable — rules-only result',
+    });
   }
 
   const checkId = persistCheck({
@@ -65,6 +72,7 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
 
   const votes = getVoteStats(urlId, { userId: req.user ? req.user.id : null });
 
+  res.locals.verdict = verdict;
   res.json({
     valid: true,
     host: parsed.host,

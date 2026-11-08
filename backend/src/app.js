@@ -24,11 +24,9 @@ function createApp() {
 
   app.use(requestLogger);
   app.use(helmet({ crossOriginResourcePolicy: false }));
-  const allowedOrigins = [
-    'https://guard.fusiontechworks.in',
-    'http://localhost:5173', // local dev
-  ];
-  app.use(cors({ origin: allowedOrigins }));
+  // Allow-list comes from CORS_ORIGINS (config), defaulting to the deployed
+  // site + local dev. Unknown browser origins get no CORS headers (§M6).
+  app.use(cors({ origin: config.corsOrigins }));
   app.use(express.json({ limit: '10kb' }));
   app.use(rateLimit({ windowMs: 60 * 1000, max: 30, message: { error: 'Too many requests. Try again later.' } }));
   app.use('/api/auth', authRateLimiter);

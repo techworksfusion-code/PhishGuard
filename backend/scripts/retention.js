@@ -38,6 +38,11 @@ const RULES = [
           WHERE (revoked_at IS NOT NULL
                  AND revoked_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 days'))
              OR expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 days')`
+  },
+  {
+    label: 'gemini_usage (> 7 days)',
+    sql: `DELETE FROM gemini_usage
+          WHERE day < strftime('%Y-%m-%d', 'now', '-7 days')`
   }
   // urls, threat_votes and the url_threat_stats view are kept:
   // aggregated, non-personal data (BACKEND_DESIGN.md §2.4).
