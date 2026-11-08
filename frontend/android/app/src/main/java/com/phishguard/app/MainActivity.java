@@ -1,13 +1,16 @@
 package com.phishguard.app;
 
 import android.os.Bundle;
+
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        // Local native plugins must be registered explicitly.
+        // IMPORTANT: plugins must be registered BEFORE super.onCreate(),
+        // because the Capacitor bridge is created there and only picks up
+        // plugins that were added to the bridge builder beforehand.
         registerPlugin(SmsInboxPlugin.class);
+        super.onCreate(savedInstanceState);
     }
 }
