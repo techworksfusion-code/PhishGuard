@@ -536,3 +536,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fb4c0080; outlin
 .guard-item small { color: var(--muted); font-size: 9px; }
 .guard-item-actions { display: flex; gap: 8px; }
 .guard-item-actions button { flex: 1; min-height: 32px; border: 1px solid var(--line); border-radius: 6px; background: #f7f8f2; font-size: 9px; font-weight: 700; cursor: pointer; }
+.guard-test-actions { display: flex; gap: 8px; }
+.guard-test-actions button { flex: 1; min-height: 38px; border: 1px solid #c9d9c7; border-radius: 7px; background: var(--green); font-size: 9px; font-weight: 700; cursor: pointer; }
+.guard-test-result { margin: 9px 0 0; color: #3f5a48; font-size: 10px; line-height: 1.5; }

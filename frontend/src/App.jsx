@@ -3,7 +3,7 @@ import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { checkLink, register, requestOtp, verifyOtp as verifyOtpApi, login, logout, getSession, isAuthenticated, getGoogleAuthUrl, exchangeGoogleCode, voteLink, getLinkSummary } from './services/api.js';
 import { fetchInboxMessages, isNativePlatform } from './services/smsInbox.js';
-import { isGuardAvailable, getGuardStatus, requestGuardPermissions, setRealtimeEnabled, getQuarantine, deleteQuarantine, restoreQuarantine, getLastAlert, clearLastAlert, syncSessionToken } from './services/guard.js';
+import { isGuardAvailable, getGuardStatus, requestGuardPermissions, setRealtimeEnabled, getQuarantine, deleteQuarantine, restoreQuarantine, getLastAlert, clearLastAlert, syncSessionToken, simulateSms } from './services/guard.js';
 
 const activitySample = {
   domain: 'secure-account-help.example',
@@ -308,6 +308,7 @@ export default function App() {
   const [guardAlert, setGuardAlert] = useState(null);
   const [quarantine, setQuarantine] = useState([]);
   const [guardBusy, setGuardBusy] = useState(false);
+  const [guardTestResult, setGuardTestResult] = useState('');
 
   // "Continue with Google" returns to /auth/google/callback?code=…&state=…
   // Finish the sign-in before anything else is shown.
@@ -523,6 +524,29 @@ export default function App() {
       await refreshGuardState();
     } catch {
       // Leave the item in place so the user can retry.
+    }
+  }
+
+  async function runGuardTest(kind) {
+    if (!isGuardAvailable()) return;
+    const scamText = 'URGENT: Your SBI account will be blocked. Complete KYC now and share your OTP at http://sbi-kyc-update.xyz/login';
+    const safeText = 'Your OTP is 482913. Do not share it with anyone.';
+    setGuardTestResult('Running the native pipeline…');
+    try {
+      const result = await simulateSms({
+        text: kind === 'scam' ? scamText : safeText,
+        sender: kind === 'scam' ? 'PhishGuard test scam' : 'PhishGuard test safe',
+      });
+      const alert = result?.alert || null;
+      if (alert) {
+        setGuardAlert(alert);
+        setGuardTestResult(`Alert raised: ${alert.verdict} (${alert.score}/100). Check your notifications.`);
+      } else {
+        setGuardTestResult('Safe message processed — no alert (expected).');
+      }
+      await refreshGuardState();
+    } catch (testError) {
+      setGuardTestResult(testError?.message || 'Test failed.');
     }
   }
 
@@ -744,7 +768,7 @@ export default function App() {
         const isGuardToggle = key === 'realtime';
         const checked = isGuardToggle && guard.available ? guard.enabled : settings[key];
         return <div className="toggle-row" key={`${label}-${index}`}><span><strong>{label}</strong><small>{isGuardToggle && !guard.available ? `${caption} · Android app only` : caption}</small></span><Toggle label={label} checked={checked} onChange={(value) => { if (isGuardToggle) { toggleRealtime(value); } else { setSettings((current) => ({ ...current, [key]: value })); } }} /></div>;
-      })}</div>)}{page === 'protection' && guard.available && <div className="setting-group"><h3>BLOCKED MESSAGES</h3><p className="guard-count-line">{guard.smsPermission ? `${guard.quarantineCount} messages quarantined on this device${guard.blockedCount ? ` · ${guard.blockedCount} senders blocked` : ''}` : 'SMS permission is off. Turn on real-time scanning to check incoming messages.'}</p>{!guard.smsPermission && <button className="primary-button" onClick={async () => { try { await requestGuardPermissions(); await refreshGuardState(); } catch { /* user can retry */ } }}>Allow SMS access</button>}<button className="outline-button" onClick={async () => { await refreshGuardState(); setPage('blocked'); }}>View blocked messages <Icon name="arrow" size={18} /></button></div>}{guardBusy && <p className="sample-data-banner"><Icon name="shield" size={15} /> Updating protection…</p>}{error && <p className="form-error" role="alert">{error}</p>}<p className="privacy-note"><Icon name="lock" size={14} /> The inbox list stays on your phone; analysis text is never stored.</p></div>;
+      })}</div>)}{page === 'protection' && guard.available && <div className="setting-group"><h3>BLOCKED MESSAGES</h3><p className="guard-count-line">{guard.smsPermission ? `${guard.quarantineCount} messages quarantined on this device${guard.blockedCount ? ` · ${guard.blockedCount} senders blocked` : ''}` : 'SMS permission is off. Turn on real-time scanning to check incoming messages.'}</p>{!guard.smsPermission && <button className="primary-button" onClick={async () => { try { await requestGuardPermissions(); await refreshGuardState(); } catch { /* user can retry */ } }}>Allow SMS access</button>}<button className="outline-button" onClick={async () => { await refreshGuardState(); setPage('blocked'); }}>View blocked messages <Icon name="arrow" size={18} /></button></div>}{page === 'protection' && guard.available && <div className="setting-group"><h3>TEST WITHOUT ANOTHER PHONE</h3><p className="guard-count-line">Runs the exact native pipeline (rules → Gemini → notification → quarantine) with a simulated sender.</p><div className="guard-test-actions"><button onClick={() => runGuardTest('scam')}>Send test scam alert</button><button onClick={() => runGuardTest('safe')}>Send test safe OTP</button></div>{guardTestResult && <p className="guard-test-result" role="status">{guardTestResult}</p>}</div>}{guardBusy && <p className="sample-data-banner"><Icon name="shield" size={15} /> Updating protection…</p>}{error && <p className="form-error" role="alert">{error}</p>}<p className="privacy-note"><Icon name="lock" size={14} /> The inbox list stays on your phone; analysis text is never stored.</p></div>;
     if (page === 'subscription') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Subscription</button><p className="subheading">A simple look at what an expanded plan could include.</p><div className="plan-card"><small>CURRENT PLAN</small><strong>Essential <span>ACTIVE</span></strong><p>Core message and link checks</p></div><h3 className="section-label">PhishGuard Plus</h3>{['Deeper protection', 'Detailed link investigations', 'Domain and registrar context', 'Extended activity history'].map((item) => <div className="plan-feature" key={item}><Icon name="check" size={17} />{item}</div>)}<p className="sample-note">Concept only · no price or billing is available.</p><button className="disabled-button" disabled>Coming soon</button></div>;
     if (page === 'account') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Account</button><div className="setting-hero"><span className="profile-avatar large">{account.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</span><h2>{account.name}</h2><p>{account.email}</p></div><button className="outline-button sign-out-button" onClick={async () => { await logout(); setAuthStage('welcome'); }}>Sign out</button><p className="inbox-privacy">Your account is managed by the PhishGuard backend.</p></div>;
     if (page === 'support') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Support</button><SectionTitle title="How can we help?" /><div className="support-card"><Icon name="help" /><strong>Stay safe online</strong><p>Never open unexpected links or share passwords and OTPs over messages.</p></div></div>;

@@ -86,6 +86,7 @@ Server response also records the event in `alert_events` (sender hash only).
 | ADD | `frontend/android/app/src/main/java/com/phishguard/app/OfflineRules.java` |
 | ADD | `frontend/android/app/src/main/java/com/phishguard/app/Notifier.java` |
 | ADD | `frontend/android/app/src/main/java/com/phishguard/app/GuardApi.java` |
+| ADD | `frontend/android/app/src/main/java/com/phishguard/app/SmsPipeline.java` |
 | ADD | `frontend/android/app/src/main/res/drawable/ic_shield_alert.xml` |
 | EDIT | `frontend/android/app/src/main/java/com/phishguard/app/MainActivity.java` (register plugin + channels) |
 | ADD | `frontend/src/services/guard.js` |
@@ -296,6 +297,7 @@ class PhishGuardPlugin : Plugin() {
     @PluginMethod fun syncSessionToken(call)          // { token } from localStorage
     @PluginMethod fun setBaseUrl(call)                // { url } override
     @PluginMethod fun testScan(call)                  // { text } → live /api/scan-message
+    @PluginMethod fun simulateSms(call)               // { text, sender } → full pipeline, no second phone
     @PluginMethod fun clearProtectionData(call)
 }
 ```
@@ -490,6 +492,16 @@ A5 unblock → next SMS is re-scored fresh (blocklist left, cache purged for sen
 | **R3** | Backend `/api/scan-message` + `/api/alerts` + `003_alerts.sql` wired + retention | supertest contract tests, 429 path |
 | **R4** | `SmsReceiver.java` full pipeline + GuardApi + banner/deep link + AlertDetail | **A1** end-to-end while app open |
 | **R5** | BlockedScreen (restore/unblock/delete) + idempotent replay dedupe + battery docs | **A3, A5** |
+
+### 9.1 Testing without a second phone
+
+`PhishGuardPlugin.simulateSms({ text, sender })` runs the **same**
+`SmsPipeline` used by the real receiver (offline rules → `/api/scan-message` →
+Gemini → notification → quarantine/blocklist). Protection settings exposes two
+buttons ("Send test scam alert", "Send test safe OTP"). This validates every
+step except the OS handing the `SMS_RECEIVED` broadcast to the app, which is
+confirmed by `adb shell dumpsys package com.phishguard.app` showing the
+registered receiver and granted `RECEIVE_SMS`.
 
 ## 10. Open items / risks
 

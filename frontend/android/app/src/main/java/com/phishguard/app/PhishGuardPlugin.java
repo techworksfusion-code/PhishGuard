@@ -171,6 +171,34 @@ public class PhishGuardPlugin extends Plugin {
         }).start();
     }
 
+    /**
+     * Simulates an incoming SMS through the complete native pipeline.
+     * Lets the app be demonstrated/tested without a second phone.
+     */
+    @PluginMethod
+    public void simulateSms(PluginCall call) {
+        final String text = call.getData().optString("text", "");
+        final String sender = call.getData().optString("sender", "PhishGuard test");
+        if (text.trim().isEmpty()) {
+            call.reject("Message text is required.");
+            return;
+        }
+
+        final PhishGuardStore store = store();
+        new Thread(() -> {
+            try {
+                JSONObject alert = SmsPipeline.process(
+                        getContext(), store, sender, store.hashSender(sender), text);
+                JSObject response = new JSObject();
+                response.put("alert", alert == null ? JSONObject.NULL : alert);
+                response.put("safe", alert == null);
+                runOnUi(() -> call.resolve(response));
+            } catch (Exception e) {
+                runOnUi(() -> call.reject("Simulation failed."));
+            }
+        }).start();
+    }
+
     @PluginMethod
     public void clearProtectionData(PluginCall call) {
         PhishGuardStore store = store();

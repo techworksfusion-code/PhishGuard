@@ -88,3 +88,9 @@ export async function testScan(text) {
   nativeOnly();
   return PhishGuard.testScan({ text });
 }
+
+/** Runs the complete native SMS pipeline with a fake sender/message. */
+export async function simulateSms({ text, sender = 'PhishGuard test' }) {
+  nativeOnly();
+  return PhishGuard.simulateSms({ text, sender });
+}
