@@ -36,7 +36,7 @@ test('normalizes ports, CORS origins and the Gemini budget', () => {
   assert.equal(config.port, 5050);
   assert.deepEqual(config.corsOrigins, ['https://app.example', 'http://localhost:5173']);
   assert.equal(config.geminiDailyMax, 0);
-  assert.equal(config.geminiModel, 'gemini-2.5-flash');
+  assert.equal(config.geminiModel, 'gemini-3.5-flash-lite');
 });
 
 test('rejects invalid ports, CORS values and budgets', () => {

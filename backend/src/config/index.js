@@ -57,7 +57,7 @@ function loadConfig(env = process.env) {
     port: positiveInt('PORT', get('PORT', '5000'), { max: 65535 }),
     databaseUrl: requireEnv('DATABASE_URL'),
     geminiApiKey: requireEnv('GEMINI_API_KEY'),
-    geminiModel: get('GEMINI_MODEL', 'gemini-2.5-flash'),
+    geminiModel: get('GEMINI_MODEL', 'gemini-3.5-flash-lite'),
     geminiDailyMax: positiveInt('GEMINI_DAILY_MAX', get('GEMINI_DAILY_MAX', '100'), { min: 0 }),
     alertPepper: requireEnv('ALERT_PEPPER'),
     tokenPepper: requireEnv('TOKEN_PEPPER'),

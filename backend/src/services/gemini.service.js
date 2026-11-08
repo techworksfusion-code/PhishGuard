@@ -22,12 +22,19 @@ function clampScore(value) {
 function normalizeSignals(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((signal) => signal && typeof signal === 'object')
-    .map((signal) => ({
-      name: String(signal.name || 'AI check').slice(0, 120),
-      points: clampScore(signal.points),
-      detail: String(signal.detail || '').slice(0, 300),
-    }));
+    .map((signal) => {
+      // Some models return plain strings even when asked for objects.
+      if (typeof signal === 'string') {
+        return { name: 'AI check', points: 0, detail: signal.slice(0, 300) };
+      }
+      if (!signal || typeof signal !== 'object') return null;
+      return {
+        name: String(signal.name || 'AI check').slice(0, 120),
+        points: clampScore(signal.points),
+        detail: String(signal.detail || '').slice(0, 300),
+      };
+    })
+    .filter(Boolean);
 }
 
 async function analyzeWithGemini(url) {
