@@ -1,10 +1,7 @@
 # PhishGuard API (backend)
 
-> **Status: M0–M1 implemented.** The API bootstrap, SQLite migrations, health
-> endpoint, URL normalization/persistence, and verdict bands are implemented.
-> Link analysis, authentication, and real-time alert routes remain planned.
-> This document is the authoritative API contract, matching `System_Design.md`
-> §7.
+> The backend implements URL checks, optional sign-in, passive dynamic-analysis
+> job brokering, PDF reports, and Telegram/WhatsApp report delivery.
 
 Module structure, database schema, and user workflows: [`../BACKEND_DESIGN.md`](../BACKEND_DESIGN.md).
 
@@ -12,9 +9,8 @@ Module structure, database schema, and user workflows: [`../BACKEND_DESIGN.md`](
 
 - Node.js + Express (PM2-managed) on port **5000**
 - SQLite via `better-sqlite3` — schema in [`../BACKEND_DESIGN.md`](../BACKEND_DESIGN.md) §2, ready-to-run migrations in [`db/migrations/`](db/migrations/)
-- `cors`, `express-rate-limit` (30 requests/minute per IP), `dotenv`, `helmet`
-- Planned for M2: Google Gemini Flash via `@google/genai` and the rule engine in
-  `src/analyzer.js` fed by `src/rules.json`
+- `cors`, `express-rate-limit` (30 requests/minute per IP), `dotenv`, `helmet`,
+  `pdfkit`, and Baileys for the opt-in WhatsApp sender account
 
 ## Environment variables
 
@@ -35,7 +31,13 @@ Copy `.env.example` (create it locally — real credentials are never committed)
 | `SMTP_HOST` / `SMTP_PORT` | SMTP server for the `smtp` channel; defaults `smtp.gmail.com:465`. Only needed when `OTP_CHANNEL=smtp` |
 | `SMTP_USER` / `SMTP_PASS` | Gmail address / **16-character App Password** (Google Account → Security → 2-Step Verification → App passwords). Regular account passwords are rejected by Gmail |
 | `SMTP_FROM` | Optional custom From line, e.g. `PhishGuard OTP <you@gmail.com>` |
-| `WHATSAPP_SESSION_DIR` | Directory holding the paired Baileys session keys (gitignored, backed up once) |
+| `WHATSAPP_SESSION_DIR` | Directory holding the paired Baileys team-sender session keys |
+| `WHATSAPP_BOT_ENABLED` | Set to `true` to start the Baileys team-sender connection |
+| `WHATSAPP_PUBLIC_NUMBER` | Team sender number users message to opt in |
+| `SANDBOX_API_BASE_URL` / `SANDBOX_API_KEY` | HTTPS API endpoint and API key for the passive analysis job broker |
+| `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` | Optional Cloudflare Access service-token credentials |
+| `APP_WEBHOOK_BASE_URL` / `WEBHOOK_SIGNING_SECRET` | Public app base URL and HMAC-SHA256 secret for sandbox callbacks |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` | Bot token and Telegram webhook secret token |
 
 Create `backend/.env` from [`.env.example`](.env.example), set
 `GEMINI_API_KEY`, then run:
@@ -81,7 +83,35 @@ Response `200`:
 }
 ```
 
-Scoring rules and verdict bands (0–29 Low risk, 30–59 Suspicious, 60–100 Dangerous) are defined in [`System_Design.md` §5](../System_Design.md). The final score is the **higher** of the rule score and the AI score; if Gemini fails, the rule result is returned with `"ai": "unavailable"`.
+Scoring rules and verdict bands (0–29 Low risk, 30–59 Suspicious, 60–100 Dangerous) are defined in [`System_Design.md` §5](../System_Design.md). The final score is the higher of the rule score and the AI score; dynamic analysis is triggered only when the rule score is strictly greater than 60. It requires a signed-in user and configured sandbox credentials.
+
+The response includes `dynamicAnalysis`:
+
+```json
+{ "status": "queued", "jobId": 27 }
+```
+
+The app submits `fill_form: false` and `persona_runs: 0`. The sandbox must only passively navigate and collect screenshots/navigation/network metadata. It must not fill or submit forms. Run browser execution in a disposable, isolated worker with no access to private networks; a Cloudflare Tunnel or Termux/proot environment by itself is not a security boundary.
+
+The backend delegates browser execution to the configured external sandbox. PhishGuard does not provision or attest the worker OS or its isolation controls. Treat disposable Linux execution and the outbound network policy as deployment requirements and verify them in the sandbox provider before production. See the [dynamic sandbox specification](../DYNAMIC_SANDBOX.md) for the full lifecycle, callback contract, evidence limits and network controls.
+
+### Dynamic analysis and reports
+
+- `GET /api/analysis/:jobId` returns the authenticated user's job status and sanitized result.
+- `GET /api/analysis/:jobId/report.pdf` remains an authenticated backend endpoint; the app UI does not expose a Reports screen or download button.
+- `POST /api/webhooks/scan-done` accepts only HMAC-SHA256 signed callbacks (`X-Signature: sha256=<hex>`) with a matching `X-Job-Id`. The callback is matched to the queued job and screenshot URLs must be same-origin with the configured sandbox API and use the job's `/shots/{job_id}/{index}` path.
+
+The same strict rule-score trigger applies to links extracted from `POST /api/scan-message`; message text is not added to the dynamic-analysis record. The report contains the rule/worker verdict details, redirect chain, contacted hosts, request metrics, timeline graph, and returned screenshots. Callback fields such as `form_submission`, persona data, and hooks are deliberately ignored and never persisted. Reports are automatically delivered as PDF attachments to linked Telegram and WhatsApp accounts; delivery outcomes are tracked per channel.
+
+### Connected messaging
+
+- `GET /api/integrations` returns connection state for the authenticated user.
+- `POST /api/integrations/telegram/link-code` returns a one-time code. The user sends `/start <code>` to the configured Telegram bot.
+- `POST /api/integrations/whatsapp/link-code` returns a one-time code. The user sends `CONNECT <code>` to the configured team WhatsApp number.
+- `DELETE /api/integrations/{telegram|whatsapp}` disconnects that destination.
+- `POST /api/webhooks/telegram` receives Telegram updates and requires `X-Telegram-Bot-Api-Secret-Token`.
+
+Register the Telegram webhook at `https://<app-origin>/api/webhooks/telegram` with Telegram's `setWebhook` API and the configured secret token. When `WHATSAPP_BOT_ENABLED=true`, the backend prints a pairing QR in its terminal for the team's sender account; the session directory contains sensitive account credentials and must be protected and backed up securely. Relative `WHATSAPP_SESSION_DIR` paths are resolved from the backend directory; the default `backend/sessions/` path is gitignored. Baileys uses the WhatsApp Web protocol and is not the official WhatsApp Business API; assess platform terms and account restrictions before production use.
 
 #### `POST /api/scan-message` (real-time SMS alerts — background receiver path)
 
@@ -117,7 +147,6 @@ Returns the last 20 results from the in-memory threat history (current session o
 
 ## Roadmap
 
-1. Implement `analyzer.js` + `rules.json` (reference pseudocode in `System_Design.md` §5)
-2. Implement `POST /api/check-link`, `GET /api/history`, and Gemini integration (M2)
-3. Add tests in `tests/` covering every rule in §5 and the score-band boundaries
-4. Deploy per [`../deployment/README.md`](../deployment/README.md)
+1. Deploy the API, isolated passive-analysis worker, Telegram webhook, and Baileys sender account with the environment variables above.
+2. Configure firewall/egress controls so the browser worker cannot reach private or local network addresses.
+3. Run `npm test` and deploy per [`../deployment/README.md`](../deployment/README.md).

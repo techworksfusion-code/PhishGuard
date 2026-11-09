@@ -10,6 +10,7 @@ const { getVoteStats } = require('../services/votes.service');
 const { analyze } = require('../analyzer');
 const { analyzeWithGemini } = require('../services/gemini.service');
 const { persistCheck } = require('../services/checks.service');
+const { queueAnalysis } = require('../services/analysis.service');
 
 const router = Router();
 
@@ -46,15 +47,16 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
   const finalScore = Math.min(100, Math.max(ruleScore, aiScore));
   const verdict = verdictFromScore(finalScore);
 
-  const allSignals = [...ruleResult.signals];
+  const allSignals = ruleResult.signals.map((signal) => ({ ...signal, source: 'rules' }));
   if (aiResult.status === 'ok') {
     if (aiResult.signals.length) {
-      allSignals.push(...aiResult.signals);
+      allSignals.push(...aiResult.signals.map((signal) => ({ ...signal, source: 'ai' })));
     }
   } else {
     allSignals.push({
       name: 'AI check',
       points: 0,
+      source: 'system',
       detail: aiResult.reason === 'daily_cap'
         ? 'AI budget reached for today — rules-only result'
         : 'AI analysis unavailable — rules-only result',
@@ -69,6 +71,11 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
     aiStatus: aiResult.status,
     signals: allSignals,
   });
+  const dynamicAnalysis = queueAnalysis({
+    userId: req.user ? req.user.id : null,
+    checkId,
+    ruleScore,
+  });
 
   const votes = getVoteStats(urlId, { userId: req.user ? req.user.id : null });
 
@@ -81,6 +88,7 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
     ai: aiResult.status === 'ok' ? 'ok' : 'unavailable',
     signals: allSignals,
     checkId,
+    dynamicAnalysis,
     urlHash: parsed.hash,
     votes,
   });

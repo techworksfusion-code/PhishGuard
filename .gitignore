@@ -10,6 +10,7 @@
 # Local SQLite database files
 backend/data/
 **/*.db
+backend/sessions/
 
 # Local environment and secrets
 **/.env

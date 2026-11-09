@@ -160,7 +160,19 @@ router.delete('/account', requireAuth, asyncHandler(async (req, res) => {
   if (token) {
     revokeSession(token);
   }
-  db.prepare('UPDATE users SET deleted_at = (strftime(\'%Y-%m-%dT%H:%M:%fZ\', \'now\')) WHERE id = ?').run(req.user.id);
+  const removePrivateReports = db.prepare('DELETE FROM analysis_jobs WHERE user_id = ?');
+  const removeLinkCodes = db.prepare('DELETE FROM integration_link_codes WHERE user_id = ?');
+  const deleteAccountData = db.transaction((userId) => {
+    removePrivateReports.run(userId);
+    removeLinkCodes.run(userId);
+    db.prepare(
+      `UPDATE users
+       SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+           telegram_chat_id = NULL, whatsapp_jid = NULL
+       WHERE id = ?`
+    ).run(userId);
+  });
+  deleteAccountData(req.user.id);
   res.json({ ok: true });
 }));
 

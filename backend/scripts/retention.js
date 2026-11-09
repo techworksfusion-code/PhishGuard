@@ -9,6 +9,18 @@ const { db } = require('../src/db');
 
 const RULES = [
   {
+    label: 'analysis_jobs (history_sync users, > 90 days)',
+    sql: `DELETE FROM analysis_jobs
+          WHERE user_id IN (SELECT id FROM users WHERE history_sync)
+            AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-90 days')`
+  },
+  {
+    label: 'analysis_jobs (non-sync users, > 24 h)',
+    sql: `DELETE FROM analysis_jobs
+          WHERE user_id IN (SELECT id FROM users WHERE NOT history_sync)
+            AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 days')`
+  },
+  {
     label: 'checks (anonymous, > 7 days)',
     sql: `DELETE FROM checks
           WHERE user_id IS NULL
@@ -31,6 +43,13 @@ const RULES = [
     sql: `DELETE FROM otp_codes
           WHERE consumed_at IS NOT NULL
              OR expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+  },
+  {
+    label: 'integration_link_codes (expired/consumed > 1 day)',
+    sql: `DELETE FROM integration_link_codes
+          WHERE (consumed_at IS NOT NULL
+                 AND consumed_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 days'))
+             OR expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 days')`
   },
   {
     label: 'sessions (revoked/expired > 1 day)',

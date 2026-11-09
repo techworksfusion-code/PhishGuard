@@ -94,13 +94,17 @@ async function verifyLogin({ email, phone, password }) {
     throw err;
   }
 
-  if (user.password_hash) {
-    const valid = await verifyPassword(password || '', user.password_hash);
-    if (!valid) {
-      const err = new Error('Invalid credentials.');
-      err.statusCode = 401;
-      throw err;
-    }
+  if (!user.password_hash) {
+    const err = new Error('This account uses Google Sign-In. Use the Google flow to sign in.');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const valid = await verifyPassword(password || '', user.password_hash);
+  if (!valid) {
+    const err = new Error('Invalid credentials.');
+    err.statusCode = 401;
+    throw err;
   }
 
   db.prepare('UPDATE users SET last_login_at = (strftime(\'%Y-%m-%dT%H:%M:%fZ\', \'now\')) WHERE id = ?').run(user.id);

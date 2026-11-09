@@ -128,6 +128,8 @@ users 1──* otp_codes (issued per destination row)
 urls 1──* threat_votes *──1 users (nullable = anonymous vote)
 urls 1──* alert_events *──1 users (nullable)     ← real-time SMS alerts (§003)
 urls 1──1 url_threat_stats    (read-time view, no refresh job)
+users 1──* analysis_jobs *──1 checks             ← private dynamic-analysis reports
+users 1──* integration_link_codes                ← one-time messenger linking codes
 ```
 
 ### 2.3 Applied schema files
@@ -137,6 +139,9 @@ urls 1──1 url_threat_stats    (read-time view, no refresh job)
 | `001_init.sql` | `users`, `otp_codes`, `sessions`, `urls`, `checks` |
 | `002_threat_reports.sql` | `threat_votes`, `url_threat_stats` view (phase 2) |
 | `003_alerts.sql` | `alert_events` — real-time SMS protection events |
+| `004_google_auth.sql` | Google identity fields and account settings |
+| `005_gemini_usage.sql` | Gemini analysis usage budget |
+| `006_dynamic_analysis.sql` | `analysis_jobs`, messenger link fields, one-time link codes |
 
 The column-level data dictionary is in **§6** below.
 
@@ -147,6 +152,8 @@ The column-level data dictionary is in **§6** below.
 | `checks` with `user_id IS NULL` | delete after 7 days |
 | `checks` for `history_sync = TRUE` users | delete after 90 days |
 | `checks` for `history_sync = FALSE` users | delete after 24 h (device keeps them) |
+| `analysis_jobs` | follow the owning user's check-retention period (including PDF/screenshots) |
+| `integration_link_codes` | delete consumed/expired codes after 1 day |
 | `otp_codes` | delete consumed/expired immediately |
 | `sessions` | delete revoked/expired after 1 day |
 | `urls`, `threat_votes`, `url_threat_stats` | kept (aggregated, non-personal) |

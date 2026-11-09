@@ -4,6 +4,7 @@ const config = require('./config');
 const { db, close } = require('./db');
 const { migrate } = require('./db/migrate');
 const { createApp } = require('./app');
+const { startWhatsApp, stopWhatsApp } = require('./services/whatsapp.service');
 
 process.on('uncaughtException', (err) => {
   console.error('[FATAL] uncaughtException:', err.message);
@@ -23,8 +24,14 @@ async function main() {
     console.log(`Environment: ${config.nodeEnv}`);
     console.log(`Database: ${config.databaseUrl}`);
   });
+  if (config.whatsappEnabled) {
+    startWhatsApp().catch((err) => {
+      console.error('[whatsapp] startup failed:', err.message);
+    });
+  }
 
   const shutdown = () => {
+    stopWhatsApp();
     server.close(() => {
       close();
       process.exit(0);

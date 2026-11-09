@@ -88,6 +88,18 @@ function normalizeResult(payload) {
     return { points: signal.points, title, detail: signal.detail };
   });
 
+  const analysisStatus = payload.dynamicAnalysis && typeof payload.dynamicAnalysis === 'object'
+    ? payload.dynamicAnalysis
+    : null;
+  const dynamicAnalysis = analysisStatus
+    && ['not_triggered', 'sign_in_required', 'unavailable', 'queued'].includes(analysisStatus.status)
+    ? {
+      status: analysisStatus.status,
+      jobId: Number.isSafeInteger(analysisStatus.jobId) ? analysisStatus.jobId : null,
+      reason: typeof analysisStatus.reason === 'string' ? analysisStatus.reason : null,
+    }
+    : null;
+
   return {
     valid: true,
     host: payload.host,
@@ -99,6 +111,7 @@ function normalizeResult(payload) {
     votes: payload.votes && Number.isInteger(payload.votes.dangerous) && Number.isInteger(payload.votes.safe)
       ? { dangerous: payload.votes.dangerous, safe: payload.votes.safe, my: payload.votes.my || null }
       : null,
+    dynamicAnalysis,
   };
 }
 
@@ -116,6 +129,37 @@ export async function checkLink(url) {
   });
 
   return normalizeResult(payload);
+}
+
+export async function getAnalysisJob(jobId) {
+  const payload = await apiRequest(`/api/analysis/${encodeURIComponent(jobId)}`, { method: 'GET' });
+  if (!payload || !['queued', 'running', 'done', 'error'].includes(payload.status)) {
+    throw new Error('The analysis service returned an invalid job status.');
+  }
+  return payload;
+}
+
+export async function getAnalysisJobs() {
+  const payload = await apiRequest('/api/analysis', { method: 'GET' });
+  if (!payload || !Array.isArray(payload.jobs)) {
+    throw new Error('The analysis service returned an invalid job list.');
+  }
+  return payload.jobs;
+}
+
+export async function getIntegrations() {
+  return apiRequest('/api/integrations', { method: 'GET' });
+}
+
+export async function createIntegrationLinkCode(channel) {
+  return apiRequest(`/api/integrations/${encodeURIComponent(channel)}/link-code`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export async function unlinkIntegration(channel) {
+  return apiRequest(`/api/integrations/${encodeURIComponent(channel)}`, { method: 'DELETE' });
 }
 
 // ---------- Community votes ----------

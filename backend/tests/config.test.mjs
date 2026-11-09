@@ -48,3 +48,30 @@ test('rejects invalid ports, CORS values and budgets', () => {
   );
   assert.throws(() => loadConfig({ ...baseEnv, GEMINI_DAILY_MAX: '-1' }), /GEMINI_DAILY_MAX/);
 });
+
+test('validates optional sandbox origins and Cloudflare Access credentials as a pair', () => {
+  const config = loadConfig({
+    ...baseEnv,
+    SANDBOX_API_BASE_URL: 'https://sandbox.example',
+    APP_WEBHOOK_BASE_URL: 'https://api.example',
+    CF_ACCESS_CLIENT_ID: 'client-id',
+    CF_ACCESS_CLIENT_SECRET: 'client-secret',
+    WHATSAPP_BOT_ENABLED: 'true',
+  });
+
+  assert.equal(config.sandboxApiBaseUrl, 'https://sandbox.example');
+  assert.equal(config.appWebhookBaseUrl, 'https://api.example');
+  assert.equal(config.whatsappEnabled, true);
+  assert.throws(() => loadConfig({
+    ...baseEnv,
+    SANDBOX_API_BASE_URL: 'https://user:pass@sandbox.example',
+  }), /SANDBOX_API_BASE_URL/);
+  assert.throws(() => loadConfig({
+    ...baseEnv,
+    CF_ACCESS_CLIENT_ID: 'client-id',
+  }), /must be set together/);
+  assert.throws(() => loadConfig({
+    ...baseEnv,
+    WEBHOOK_SIGNING_SECRET: 'too-short',
+  }), /at least 32 bytes/);
+});

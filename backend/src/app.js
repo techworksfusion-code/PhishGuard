@@ -13,6 +13,7 @@ const { validate } = require('./middleware/validate');
 const { optionalAuth } = require('./middleware/auth');
 const routes = require('./routes');
 const authRoutes = require('./routes/auth.routes');
+const webhooksRoutes = require('./routes/webhooks.routes');
 
 function createApp() {
   const app = express();
@@ -27,15 +28,16 @@ function createApp() {
   // Allow-list comes from CORS_ORIGINS (config), defaulting to the deployed
   // site + local dev. Unknown browser origins get no CORS headers (§M6).
   app.use(cors({ origin: config.corsOrigins }));
-  app.use(express.json({ limit: '10kb' }));
   app.use(rateLimit({ windowMs: 60 * 1000, max: 30, message: { error: 'Too many requests. Try again later.' } }));
+  app.use('/api/webhooks', webhooksRoutes);
+  app.use(express.json({ limit: '10kb' }));
   app.use('/api/auth', authRateLimiter);
 
-app.use(validate);
-app.use(optionalAuth);
+  app.use(validate);
+  app.use(optionalAuth);
 
-app.use('/api/auth', authRoutes);
-app.use('/api', routes);
+  app.use('/api/auth', authRoutes);
+  app.use('/api', routes);
 
   app.use((_req, _res, next) => {
     const err = new Error('Not found');

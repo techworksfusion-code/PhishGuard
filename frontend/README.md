@@ -38,7 +38,9 @@ Copy `.env.example` to `.env.local`:
 
 ## Screens
 
-Animated splash and welcome → sign-in / registration (email or phone leads to a six-digit OTP **demo** screen, code `123456`) → dashboard with Home, Inbox, Scan, Activity, Profile, link results, message details and sample settings.
+Animated splash and welcome → sign-in / registration (email or phone leads to a six-digit OTP **demo** screen, code `123456`) → dashboard with Home, Inbox, Scan, Sandbox, Activity, Profile, link results, message details and sample settings. Sandbox explains the dynamic-analysis workflow and shows account-owned job history and delivery status. Completed PDF reports are sent through connected Telegram and WhatsApp services; there is no Reports screen or in-app download. Dark mode is available in Profile → Appearance and is saved on the device.
+
+- The Sandbox guide describes the isolated Linux worker and network restrictions as deployment requirements. It does not attest that a particular configured sandbox enforces them; see [`../DYNAMIC_SANDBOX.md`](../DYNAMIC_SANDBOX.md).
 
 - The demo analyzer reproduces the server rule engine (see [`../System_Design.md`](../System_Design.md) §5) so the UI is testable without a backend.
 - Auth screens are **prototypes only**: no real authentication, OTP delivery, OAuth, or account persistence.

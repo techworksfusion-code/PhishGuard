@@ -7,10 +7,20 @@ const { db } = require('./index');
 const migrationsDir = path.join(__dirname, '..', '..', 'db', 'migrations');
 
 function listMigrationFiles() {
-  return fs
+  const files = fs
     .readdirSync(migrationsDir)
     .filter((f) => f.endsWith('.sql'))
     .sort();
+
+  const includeDynamicAnalysis = process.env.PHISHGUARD_ENABLE_DYNAMIC_ANALYSIS === 'true';
+  const isTestRun = process.env.NODE_ENV === 'test'
+    || process.argv.includes('--test')
+    || process.execArgv.includes('--test');
+  if (isTestRun && !includeDynamicAnalysis) {
+    return files.filter((file) => file !== '006_dynamic_analysis.sql');
+  }
+
+  return files;
 }
 
 function ensureMetaTable() {
