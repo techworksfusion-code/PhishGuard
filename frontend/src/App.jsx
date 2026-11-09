@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { checkLink, register, requestOtp, verifyOtp as verifyOtpApi, login, logout, getSession, isAuthenticated, getGoogleAuthUrl, exchangeGoogleCode, voteLink, getLinkSummary } from './services/api.js';
+import { checkLink, register, requestOtp, verifyOtp as verifyOtpApi, login, logout, getSession, isAuthenticated, getGoogleAuthUrl, exchangeGoogleCode, voteLink, getLinkSummary, getAnalysisJob, getAnalysisJobs, getIntegrations, createIntegrationLinkCode, unlinkIntegration } from './services/api.js';
 import { fetchInboxMessages, isNativePlatform } from './services/smsInbox.js';
 import { isGuardAvailable, getGuardStatus, requestGuardPermissions, setRealtimeEnabled, getQuarantine, deleteQuarantine, restoreQuarantine, getLastAlert, clearLastAlert, syncSessionToken, simulateSms } from './services/guard.js';
 
@@ -16,12 +16,15 @@ const navItems = [
   { id: 'home', label: 'Home', icon: 'home' },
   { id: 'inbox', label: 'Inbox', icon: 'inbox' },
   { id: 'scan', label: 'Scan', icon: 'scan' },
+  { id: 'sandbox', label: 'Sandbox', icon: 'globe' },
   { id: 'activity', label: 'Activity', icon: 'activity' },
 ];
 
 function Icon({ name, size = 20, ...props }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, ...props };
   const paths = {
+    whatsapp: <><path d="M12 2.4a9.2 9.2 0 0 0-7.9 13.9L3 21l4.8-1.1A9.2 9.2 0 1 0 12 2.4Z" /><path d="M8.2 7.4c-.3.4-.6 1-.6 1.6 0 .5.2 1.1.5 1.7.7 1.5 2.1 3.1 3.7 4.1 1.2.8 2.4 1.2 3.2 1.2.7 0 1.3-.3 1.7-.8.2-.3.4-.8.4-1.1l-2.2-1.1-.9 1c-1.5-.6-2.7-1.8-3.3-3.3l.9-.9-1.1-2.2c-.7-.3-1.7-.6-2.3-.2Z" /></>,
+    telegram: <path d="M23.9 3.8 20.3 20.8c-.3 1.2-1 1.5-2 .9l-5.4-4-2.6 2.5c-.3.3-.6.5-1.1.5l.4-5.6L19.7 6.9c.4-.4-.1-.6-.7-.2L6.6 14.6l-5.4-1.7c-1.2-.4-1.2-1.2.2-1.7l21-8c1-.4 1.8.2 1.5.6Z" fill="currentColor" stroke="none" />,
     home: <><path d="m3.5 10 8.5-7 8.5 7v10a1 1 0 0 1-1 1h-5v-7h-5v7h-5a1 1 0 0 1-1-1z" /></>,
     inbox: <><path d="M4 4h16l2 11v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-4z" /><path d="M2 15h6l2 3h4l2-3h6" /></>,
     scan: <><path d="M8 4.5A8.5 8.5 0 0 1 20.5 17" /><path d="M5 7.5A8.5 8.5 0 0 0 17 20" /><path d="M8.5 12a3.5 3.5 0 1 1 7 0c0 2-1 3.5-2.5 5" /><path d="M12 8.5v3.8" /><path d="M12 16.2v.1" /></>,
@@ -331,6 +334,14 @@ export default function App() {
   const [token, setTokenState] = useState(null);
   const [tab, setTabState] = useState('home');
   const [page, setPageState] = useState('');
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem('phishguard_theme') === 'dark' ? 'dark' : 'light';
+    } catch (error) {
+      console.warn('Could not read the saved appearance preference.', error);
+      return 'light';
+    }
+  });
   const navigationDepth = useRef(0);
   const [url, setUrl] = useState('');
   const [scan, setScan] = useState(null);
@@ -352,6 +363,17 @@ export default function App() {
   const [quarantine, setQuarantine] = useState([]);
   const [guardBusy, setGuardBusy] = useState(false);
   const [guardTestResult, setGuardTestResult] = useState('');
+  const [analysisJob, setAnalysisJob] = useState(null);
+  const [analysisError, setAnalysisError] = useState('');
+  const [integrationStatus, setIntegrationStatus] = useState(null);
+  const [integrationLoading, setIntegrationLoading] = useState(false);
+  const [integrationCode, setIntegrationCode] = useState(null);
+  const [integrationMessage, setIntegrationMessage] = useState('');
+  const [integrationBusy, setIntegrationBusy] = useState(false);
+  const [analysisJobs, setAnalysisJobs] = useState([]);
+  const [analysisJobsLoading, setAnalysisJobsLoading] = useState(false);
+  const [analysisJobsError, setAnalysisJobsError] = useState('');
+  const [analysisJobsRefresh, setAnalysisJobsRefresh] = useState(0);
 
   // "Continue with Google" returns to /auth/google/callback?code=…&state=…
   // Finish the sign-in before anything else is shown.
@@ -411,6 +433,15 @@ export default function App() {
     initAuth();
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem('phishguard_theme', theme);
+    } catch (error) {
+      console.warn('Could not save the appearance preference.', error);
+    }
+  }, [theme]);
 
   function getTokenFromApi() {
     if (typeof localStorage !== 'undefined') {
@@ -632,6 +663,84 @@ export default function App() {
     return undefined;
   }, [authStage, tab]);
 
+  useEffect(() => {
+    const jobId = scan?.dynamicAnalysis?.jobId;
+    if (authStage !== 'app' || page !== 'scan-result' || !jobId) return undefined;
+
+    let active = true;
+    let timer;
+    async function refreshAnalysis() {
+      try {
+        const job = await getAnalysisJob(jobId);
+        if (!active) return;
+        setAnalysisJob(job);
+        setAnalysisError('');
+        const deliveriesPending = Object.values(job.deliveries || {}).includes('pending');
+        if (job.status === 'error' || (job.status === 'done' && !deliveriesPending)) clearInterval(timer);
+      } catch (jobError) {
+        if (active) setAnalysisError(jobError instanceof Error ? jobError.message : 'Could not load dynamic analysis.');
+      }
+    }
+
+    refreshAnalysis();
+    timer = setInterval(refreshAnalysis, 4000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [authStage, page, scan?.dynamicAnalysis?.jobId]);
+
+  useEffect(() => {
+    if (authStage !== 'app' || page !== 'integrations') return undefined;
+    let active = true;
+    setIntegrationStatus(null);
+    setIntegrationLoading(true);
+    async function refreshIntegrations() {
+      try {
+        const status = await getIntegrations();
+        if (active) {
+          setIntegrationStatus(status);
+          setIntegrationLoading(false);
+        }
+      } catch (statusError) {
+        if (active) {
+          setIntegrationLoading(false);
+          setIntegrationMessage(statusError?.message || 'Could not load connected services.');
+        }
+      }
+    }
+    refreshIntegrations();
+    const timer = setInterval(refreshIntegrations, 5000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [authStage, page]);
+
+  useEffect(() => {
+    if (integrationCode && integrationStatus?.[integrationCode.channel]?.connected) {
+      setIntegrationCode(null);
+    }
+  }, [integrationCode, integrationStatus]);
+
+  useEffect(() => {
+    if (authStage !== 'app' || tab !== 'sandbox' || page) return undefined;
+    let active = true;
+    setAnalysisJobsLoading(true);
+    setAnalysisJobsError('');
+    getAnalysisJobs()
+      .then((jobs) => {
+        if (active) setAnalysisJobs(jobs);
+      })
+      .catch((jobsError) => {
+        if (active) setAnalysisJobsError(jobsError instanceof Error ? jobsError.message : 'Could not load your analysis history.');
+      })
+      .finally(() => {
+        if (active) setAnalysisJobsLoading(false);
+      });
+    return () => { active = false; };
+  }, [authStage, tab, page, analysisJobsRefresh]);
+
   if (authStage !== 'app') {
     return <AuthFlow
       stage={authStage}
@@ -673,6 +782,27 @@ export default function App() {
     }
   }
   function openTab(id) { navigateTo(id); setSelectedMessage(null); }
+  async function openAnalysisJob(jobSummary) {
+    setAnalysisJobsError('');
+    try {
+      const job = await getAnalysisJob(jobSummary.id);
+      setAnalysisJob(job);
+      setScan({
+        host: job.host,
+        score: job.score,
+        verdict: job.verdict,
+        signals: job.signals.map((signal) => ({ title: signal.name || signal.title || 'Finding', detail: signal.detail || '', points: signal.points || 0 })),
+        urlHash: null,
+        dynamicAnalysis: { status: job.status === 'error' ? 'unavailable' : 'queued', jobId: job.id },
+      });
+      setTabState('scan');
+      setPageState('scan-result');
+      navigationDepth.current += 1;
+      window.history.pushState({ phishGuardRoute: { tab: 'scan', page: 'scan-result', depth: navigationDepth.current } }, '', window.location.href);
+    } catch (jobError) {
+      setAnalysisJobsError(jobError instanceof Error ? jobError.message : 'Could not open this sandbox analysis.');
+    }
+  }
   async function runScan(event) {
     event?.preventDefault();
     setError('');
@@ -683,6 +813,8 @@ export default function App() {
         setError(result.error);
         return;
       }
+      setAnalysisJob(null);
+      setAnalysisError('');
       setScan(result);
       setHistory((items) => [{ ...result, raw: url, time: 'Just now' }, ...items].slice(0, 5));
       setPage('scan-result');
@@ -690,6 +822,36 @@ export default function App() {
       setError(scanError instanceof Error ? scanError.message : 'Unable to check this link. Please try again.');
     } finally {
       setIsScanning(false);
+    }
+  }
+
+  async function connectIntegration(channel) {
+    setIntegrationBusy(true);
+    setIntegrationMessage('');
+    setIntegrationCode(null);
+    try {
+      const result = await createIntegrationLinkCode(channel);
+      setIntegrationCode(result);
+      setIntegrationMessage(result.instructions || 'Follow the instructions to connect your account.');
+    } catch (connectionError) {
+      setIntegrationMessage(connectionError?.message || 'Could not start the connection.');
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function disconnectIntegration(channel) {
+    setIntegrationBusy(true);
+    setIntegrationMessage('');
+    try {
+      await unlinkIntegration(channel);
+      setIntegrationStatus(await getIntegrations());
+      setIntegrationCode(null);
+      setIntegrationMessage(`${channel === 'telegram' ? 'Telegram' : 'WhatsApp'} disconnected.`);
+    } catch (disconnectError) {
+      setIntegrationMessage(disconnectError?.message || 'Could not disconnect the service.');
+    } finally {
+      setIntegrationBusy(false);
     }
   }
 
@@ -758,18 +920,63 @@ export default function App() {
         <button className="primary-button" type="submit" disabled={isScanning}>{isScanning ? <><span className="button-spinner" aria-hidden="true" /> Checking link…</> : <>Check link <Icon name="arrow" size={18} /></>}</button>
       </form>
       <div className="scan-privacy"><Icon name="lock" size={16} /><span><strong>We never open the link.</strong><small>Only the address text is checked.</small></span></div>
-      {history.length > 0 && <div className="recent-checks"><div className="simple-title"><strong>Recent checks</strong><button onClick={() => setHistory([])}>Clear</button></div>{history.slice(0, 3).map((item, index) => <button className="check-history-row" key={`${item.host}-${index}`} onClick={() => { setScan(item); setPage('scan-result'); }}><span className={`risk-dot ${item.verdict.toLowerCase().replace(' ', '-')}`} /><span>{item.host}</span><small>{item.verdict}</small></button>)}</div>}
+      {history.length > 0 && <div className="recent-checks"><div className="simple-title"><strong>Recent checks</strong><button onClick={() => setHistory([])}>Clear</button></div>{history.slice(0, 3).map((item, index) => <button className="check-history-row" key={`${item.host}-${index}`} onClick={() => { setAnalysisJob(null); setAnalysisError(''); setScan(item); setPage('scan-result'); }}><span className={`risk-dot ${item.verdict.toLowerCase().replace(' ', '-')}`} /><span>{item.host}</span><small>{item.verdict}</small></button>)}</div>}
     </div>;
   }
 
   function renderScanResult() {
     if (!scan) return renderScan();
     const risk = scan.verdict.toLowerCase().replace(' ', '-');
+    const dynamic = scan.dynamicAnalysis;
+    const dynamicResult = analysisJob?.result;
     return <div className="page-content result-page">
       <button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Back to scanner</button>
-      <div className={`result-hero ${risk}`}><span className="result-icon"><Icon name={scan.verdict === 'Low risk' ? 'shield' : 'alert'} size={30} /></span><p className="eyebrow">LINK ANALYSIS</p><h2>{scan.verdict === 'Low risk' ? 'Looks safe to us.' : scan.verdict === 'Suspicious' ? 'Be careful with this.' : "We wouldn't open this."}</h2><p>{scan.verdict === 'Low risk' ? 'No known red flags were found. Stay alert, even with links that look familiar.' : 'This link shows signs that may point to a fraudulent website.'}</p><div className="score-wrap"><span>Risk score</span><strong>{scan.score}<small>/100</small></strong><div className="score-track"><i style={{ width: `${scan.score}%` }} /></div></div></div>
+      <div className={`result-hero ${risk}`}>
+        <div className="result-hero-top">
+          <span className="result-icon"><Icon name={scan.verdict === 'Low risk' ? 'shield' : 'alert'} size={26} /></span>
+          <span className={`risk-label ${risk}`}>{scan.verdict}</span>
+        </div>
+        <p className="eyebrow">LINK ANALYSIS</p>
+        <h2>{scan.verdict === 'Low risk' ? 'Looks safe to us.' : scan.verdict === 'Suspicious' ? 'Be careful with this.' : "We wouldn't open this."}</h2>
+        <p>{scan.verdict === 'Low risk' ? 'No known red flags were found. Stay alert, even with links that look familiar.' : 'This link shows signs that may point to a fraudulent website.'}</p>
+        <div className="score-wrap"><span>Risk score</span><strong>{scan.score}<small>/100</small></strong><div className="score-track"><i style={{ width: `${scan.score}%` }} /></div></div>
+      </div>
       <div className="domain-chip"><Icon name="globe" size={18} /><span>{scan.host}</span><strong className={`risk-label ${risk}`}>{scan.verdict}</strong></div>
       {scan.urlHash && <CommunityVotes urlHash={scan.urlHash} />}
+      {dynamic && dynamic.status !== 'not_triggered' && <section className="dynamic-report-card">
+        <div className="dynamic-report-heading">
+          <span className="dynamic-report-icon"><Icon name="scan" size={21} /></span>
+          <span className="dynamic-report-title"><strong>Dynamic analysis</strong><small>Passive check · external worker</small></span>
+          {analysisJob?.status && <span className={`job-status ${analysisJob.status}`}><i />{analysisJob.status}</span>}
+        </div>
+        {dynamic.status === 'sign_in_required' && <div className="analysis-state"><p>Sign in to run a dynamic analysis for this link.</p></div>}
+        {dynamic.status === 'unavailable' && <div className="analysis-state"><p>The sandbox is not configured yet. The rule-based result is still available.</p></div>}
+        {dynamic.status === 'queued' && !analysisJob && <div className="analysis-state"><span className="analysis-spinner" /><p role="status">Your analysis is queued and will start shortly.</p></div>}
+        {(analysisJob?.status === 'queued' || analysisJob?.status === 'running') && <div className="analysis-state"><span className="analysis-spinner" /><p role="status">Checking page navigation and network behavior. Disposable Linux isolation is a deployment requirement; forms are never filled or submitted.</p></div>}
+        {analysisJob?.status === 'error' && <div className="analysis-state error"><Icon name="alert" size={18} /><p role="alert">Dynamic analysis could not be completed. Your rule-based result is unchanged.</p></div>}
+        {analysisJob?.status === 'done' && dynamicResult && <>
+          <div className="dynamic-report-verdict"><span className="eyebrow">SANDBOX VERDICT</span><strong>{dynamicResult.verdict?.label || 'Unrated'}</strong><small>{dynamicResult.duration_seconds ?? '—'} sec analysis</small></div>
+          <div className="dynamic-report-summary">
+            <span><Icon name="arrow" size={16} /><small>Redirects</small><strong>{dynamicResult.navigation?.hop_count ?? 0}</strong></span>
+            <span><Icon name="globe" size={16} /><small>Hosts contacted</small><strong>{dynamicResult.navigation?.hosts_contacted ?? 0}</strong></span>
+            <span><Icon name="scan" size={16} /><small>Screenshots</small><strong>{dynamicResult.screenshots?.length || 0}</strong></span>
+          </div>
+          {dynamicResult.final_url && <p className="dynamic-final-url"><strong>Final URL</strong><code>{dynamicResult.final_url}</code></p>}
+          {dynamicResult.verdict?.reasons?.length > 0 && <div className="sandbox-reasons"><h3>Why this verdict</h3><ul>{dynamicResult.verdict.reasons.map((reason, index) => <li key={`reason-${index}`}>{reason}</li>)}</ul></div>}
+          {dynamicResult.navigation?.redirect_chain?.length > 0 && <div className="sandbox-evidence"><h3>Redirect chain</h3><ol>{dynamicResult.navigation.redirect_chain.map((redirect, index) => <li key={`redirect-${index}`}><code>{redirect}</code></li>)}</ol></div>}
+          {(dynamicResult.network_metrics?.top_hosts?.length > 0 || Object.keys(dynamicResult.network_metrics?.requests_by_type || {}).length > 0) && <div className="sandbox-network">
+            <h3>Network activity</h3>
+            {dynamicResult.network_metrics?.top_hosts?.length > 0 && <ul className="sandbox-hosts">{dynamicResult.network_metrics.top_hosts.map((host, index) => <li key={`host-${index}`}><code>{host.host}</code><span>{host.requests} requests</span></li>)}</ul>}
+            {Object.keys(dynamicResult.network_metrics?.requests_by_type || {}).length > 0 && <div className="sandbox-request-types">{Object.entries(dynamicResult.network_metrics.requests_by_type).map(([type, count]) => <span key={type}><small>{type}</small><strong>{count}</strong></span>)}</div>}
+          </div>}
+          <p className="report-included"><Icon name="check" size={15} /> The evidence package is sent as a PDF to connected services.</p>
+          {analysisJob.deliveries && <p className="delivery-status" role="status">
+            {Object.entries(analysisJob.deliveries).map(([channel, status]) => <span key={channel} className={`delivery-chip ${channel}`}><Icon name={channel === 'telegram' ? 'telegram' : 'whatsapp'} size={14} />{channel}: {status}</span>)}
+          </p>}
+          <p className="delivery-hint">Manage delivery destinations in Profile → Connected services.</p>
+        </>}
+        {analysisError && <p className="form-error" role="alert">{analysisError}</p>}
+      </section>}
       <div className="result-section"><h3>What stood out</h3>{scan.signals.length ? scan.signals.map((signal, index) => <div className="signal-row" key={`${signal.title}-${index}`}><span className="signal-icon"><Icon name={signal.title.includes('secure') ? 'lock' : 'alert'} size={17} /></span><span><strong>{signal.title}</strong><small>{signal.detail}</small></span></div>) : <div className="signal-row"><span className="signal-icon safe"><Icon name="check" size={17} /></span><span><strong>No known red flags found</strong><small>This is not a guarantee that the website is safe.</small></span></div>}</div>
       <div className="advisory"><Icon name="lock" size={18} /><span><strong>Remember</strong><small>Never share your password, PIN, or one-time passcode from a link.</small></span></div>
       <button className="primary-button" onClick={() => { setUrl(''); setError(''); setPage(''); }}>Check another link <Icon name="arrow" size={18} /></button>
@@ -779,14 +986,96 @@ export default function App() {
 
   function renderActivity() {
     return <div className="page-content activity-page">
-      <SectionTitle eyebrow="THREAT INTELLIGENCE / SAMPLE CASE" title="Activity" />
-      <p className="sample-data-banner"><Icon name="shield" size={15} /> Activity synced from your PhishGuard account.</p>
-      <div className="captured-banner"><span className="banner-icon"><Icon name="scan" /></span><span><strong>AI monitoring system</strong><small>Suspicious SMS intercepted · Case SM-0241</small></span><span className="captured-tag">CAPTURED</span></div>
-      <div className="content-section"><h3>Captured message</h3><div className="captured-message"><p>URGENT: Your account is locked. Verify your identity now at secure-account-help.example</p><small>From Unknown sender · Sample SMS</small></div></div>
-      <div className="content-section"><h3>Link evidence <span className="risk-label dangerous">HIGH RISK</span></h3><DetailField label="DOMAIN" value={activitySample.domain} /><DetailField label="REGISTRAR" value={<>{activitySample.registrar} <em>· sample</em></>} /><DetailField label="REGISTERED" value={<>{activitySample.registered} <em>· sample</em></>} /><DetailField label="SIGNAL" value={activitySample.signal} /></div>
-      {scan && scan.urlHash ? <CommunityVotes urlHash={scan.urlHash} /> : <div className="community-card"><div><strong>Community verdicts live on scan results</strong><small>Check a link to read and add community reports.</small></div></div>}
-      <p className="sample-note">Activity data from your PhishGuard account.</p>
-      <button className="outline-button" onClick={() => setPage('forensics')}>Open full forensic report <Icon name="arrow" size={18} /></button>
+      <SectionTitle eyebrow="THREAT INTELLIGENCE" title="Activity" />
+      <p className="sample-data-banner"><Icon name="shield" size={15} /> Example case for preview. Live link checks appear in Scan results.</p>
+      <div className="activity-case-card">
+        <div className="captured-banner"><span className="banner-icon"><Icon name="scan" /></span><span><strong>AI monitoring system</strong><small>Suspicious SMS intercepted · Case SM-0241</small></span><span className="captured-tag">SAMPLE</span></div>
+        <div className="activity-case-summary"><span><small>CASE STATUS</small><strong><i /> Captured for review</strong></span><span><small>RISK LEVEL</small><strong className="activity-risk">High risk</strong></span><span><small>DETECTION</small><strong>3 signals</strong></span></div>
+        <div className="content-section"><h3><span className="activity-section-icon"><Icon name="message" size={16} /></span>Captured message</h3><div className="captured-message"><p>URGENT: Your account is locked. Verify your identity now at secure-account-help.example</p><small>From Unknown sender · Sample SMS</small></div></div>
+        <div className="content-section"><h3><span className="activity-section-icon"><Icon name="globe" size={16} /></span>Link evidence <span className="risk-label dangerous">HIGH RISK</span></h3><DetailField label="DOMAIN" value={activitySample.domain} /><DetailField label="REGISTRAR" value={<>{activitySample.registrar} <em>· sample</em></>} /><DetailField label="REGISTERED" value={<>{activitySample.registered} <em>· sample</em></>} /><DetailField label="SIGNAL" value={activitySample.signal} /></div>
+      </div>
+      <div className="activity-community">{scan && scan.urlHash ? <CommunityVotes urlHash={scan.urlHash} /> : <div className="community-card"><span className="activity-section-icon"><Icon name="globe" size={16} /></span><div><strong>Community verdicts</strong><small>Check a link to read and add community reports.</small></div><Icon name="chevron" size={18} /></div>}</div>
+      <button className="outline-button activity-report-button" onClick={() => setPage('forensics')}>Open digital forensics report <Icon name="arrow" size={18} /></button>
+    </div>;
+  }
+
+  function renderSandbox() {
+    const activeJobs = analysisJobs.filter((job) => ['queued', 'running'].includes(job.status)).length;
+    const deliveredJobs = analysisJobs.filter((job) => Object.values(job.deliveries || {}).includes('sent')).length;
+    const workflow = [
+      { icon: 'scan', title: 'Eligibility check', detail: 'Rule score must be over 60; a signed-in account and configured sandbox are required.' },
+      { icon: 'globe', title: 'Real-time sandbox run', detail: 'Follow queued, running and completed status as an eligible URL is inspected passively on Linux.' },
+      { icon: 'activity', title: 'Evidence capture', detail: 'Collect redirects, contacted hosts, request types, a short timeline and up to four screenshots.' },
+      { icon: 'shield', title: 'Private PDF delivery', detail: 'Completed evidence reports are sent privately to linked Telegram or WhatsApp accounts.' },
+    ];
+    return <div className="page-content library-page">
+      <SectionTitle eyebrow="LINK INVESTIGATION" title="Sandbox" />
+      <p className="library-intro">Compare Linux sandbox analysis tiers, then follow real-time dynamic URL inspections. Completed reports are delivered privately through your linked Telegram or WhatsApp account.</p>
+      <section className="sandbox-service-panel" aria-labelledby="sandbox-service-title">
+        <div className="sandbox-service-heading">
+          <span className="sandbox-service-mark"><Icon name="globe" size={20} /></span>
+          <div><p className="eyebrow">REAL-TIME DYNAMIC ANALYSIS</p><h3 id="sandbox-service-title">Linux sandbox plans &amp; pricing</h3></div>
+          <span className="sandbox-service-state"><i /> Example plans</span>
+        </div>
+        <div className="sandbox-table-wrap" role="region" aria-label="Linux sandbox plans and example price per analysis" tabIndex="0">
+          <table className="sandbox-provider-table">
+            <thead><tr><th scope="col">Provider</th><th scope="col">Analysis profile</th><th scope="col">Sandbox OS</th><th scope="col">Analysis includes</th><th scope="col">Price / analysis</th></tr></thead>
+            <tbody>
+              <tr>
+                <th scope="row"><strong>Sandbox 1</strong><small>Standard tier</small></th>
+                <td><strong>Real-time dynamic analysis</strong><small>Passive URL inspection</small></td>
+                <td><strong>Linux</strong><small>Isolated browser session</small></td>
+                <td><strong>Core evidence</strong><small>Redirects, page behavior and network activity</small></td>
+                <td className="sandbox-price"><strong>₹120</strong><small>per analysis</small></td>
+              </tr>
+              <tr>
+                <th scope="row"><strong>Sandbox 2</strong><small>Advanced tier</small></th>
+                <td><strong>Advanced dynamic analysis</strong><small>Expanded passive inspection</small></td>
+                <td><strong>Linux</strong><small>Isolated browser session</small></td>
+                <td><strong>Extended evidence</strong><small>Detailed redirects, network activity and screenshots</small></td>
+                <td className="sandbox-price"><strong>₹250</strong><small>per analysis</small></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div className="sandbox-service-footer">
+          <span><Icon name="shield" size={15} /> Example plans and prices only—not live provider offers. Provider selection and billing are not enabled; eligible scans use the operator-configured connector. Completed reports are sent privately to linked Telegram or WhatsApp accounts.</span>
+          <button className="sandbox-service-link" onClick={() => setPage('integrations')}>Manage connected services <Icon name="arrow" size={15} /></button>
+        </div>
+      </section>
+      <section className="sandbox-guide" aria-labelledby="sandbox-process-title">
+        <div className="sandbox-guide-heading">
+          <div><p className="eyebrow">HOW DYNAMIC ANALYSIS WORKS</p><h3 id="sandbox-process-title">A link inspection, step by step</h3></div>
+          <span className="sandbox-process-tag"><i /> Passive only</span>
+        </div>
+        <ol className="sandbox-flow">
+          {workflow.map((step, index) => <li className="sandbox-flow-step" key={step.title}>
+            <span className="sandbox-flow-icon"><Icon name={step.icon} size={19} /></span>
+            <span className="sandbox-flow-number">0{index + 1}</span>
+            <strong>{step.title}</strong>
+            <small>{step.detail}</small>
+          </li>)}
+        </ol>
+        <div className="sandbox-guardrail">
+          <span className="sandbox-guardrail-icon"><Icon name="lock" size={19} /></span>
+          <div><strong>Isolated Linux worker · required deployment control</strong><p>PhishGuard sends scans to the configured external sandbox. Disposable Linux isolation and public-web-only egress must be enforced by that deployment; this app does not receive per-run worker attestation.</p></div>
+          <span className="sandbox-environment-badge">Deployment requirement</span>
+        </div>
+        <div className="sandbox-network-spec">
+          <div><span className="sandbox-network-dot allow" /><span><strong>Observe</strong><small>Redirect chain, contacted hostnames, request-type totals, timing and screenshots.</small></span></div>
+          <div><span className="sandbox-network-dot block" /><span><strong>Constrain</strong><small>Worker policy must deny loopback, private, link-local and cloud metadata destinations.</small></span></div>
+        </div>
+        <p className="sandbox-documentation">Network restrictions are deployment controls, not guaranteed by this UI. See the <a href="https://github.com/techworksfusion-code/PhishGuard/blob/main/DYNAMIC_SANDBOX.md" target="_blank" rel="noreferrer">dynamic sandbox specification</a>.</p>
+      </section>
+      <div className="library-metrics"><span><strong>{analysisJobs.length}</strong><small>Analyses</small></span><span><strong>{activeJobs}</strong><small>In progress</small></span><span><strong>{deliveredJobs}</strong><small>PDF sent</small></span></div>
+      <div className="library-heading"><div><p className="eyebrow">YOUR ANALYSES</p><h3>Recent sandbox runs</h3></div><button className="library-refresh" onClick={() => setAnalysisJobsRefresh((value) => value + 1)} disabled={analysisJobsLoading}><Icon name="clock" size={15} /> Refresh</button></div>
+      {analysisJobsError && <p className="form-error" role="alert">{analysisJobsError}</p>}
+      {analysisJobsLoading && analysisJobs.length === 0 && <p className="empty-state">Loading your sandbox analyses…</p>}
+      {!analysisJobsLoading && analysisJobs.length === 0 && !analysisJobsError && <div className="library-empty"><span><Icon name="scan" size={23} /></span><h3>No sandbox analyses yet</h3><p>Scan a suspicious link. Higher-risk links are automatically queued for passive sandbox inspection.</p><button className="primary-button" onClick={() => openTab('scan')}>Scan a link <Icon name="arrow" size={17} /></button></div>}
+      <div className="analysis-job-list">{analysisJobs.map((job) => <button className="analysis-job-card" key={job.id} onClick={() => openAnalysisJob(job)}>
+        <span className="analysis-job-icon"><Icon name="globe" size={18} /></span><span className="analysis-job-copy"><strong>{job.host}</strong><small>{job.verdict} · Risk score {job.score}/100 · {new Date(job.createdAt).toLocaleString()}</small>{job.status === 'done' && <span className="delivery-status">{Object.entries(job.deliveries || {}).map(([channel, status]) => <span key={channel} className={`delivery-chip ${channel}`}><Icon name={channel === 'telegram' ? 'telegram' : 'whatsapp'} size={13} />{channel}: {status}</span>)}</span>}</span><span className={`job-status ${job.status}`}><i />{job.status}</span><Icon name="chevron" size={18} />
+      </button>)}</div>
+      <p className="library-privacy"><Icon name="lock" size={15} /> Analysis history is private to your account. Completed PDF reports are delivered through connected services, not stored in a Reports screen.</p>
     </div>;
   }
 
@@ -798,9 +1087,11 @@ export default function App() {
         ['protection', 'Protection settings', 'shield'],
         ['notifications', 'Notifications', 'bell'],
         ['privacy', 'Privacy', 'lock'],
+        ['integrations', 'Connected services', 'message'],
         ['subscription', 'Subscription', 'card'],
       ].map(([key, label, icon]) => <button className="settings-link" key={key} onClick={() => setPage(key)}><span className="settings-icon"><Icon name={icon} size={18} /></span><strong>{label}</strong><Icon name="chevron" size={18} /></button>)}</div>
       <div className="content-section"><h3>SUPPORT</h3><button className="settings-link" onClick={() => setPage('support')}><span className="settings-icon"><Icon name="help" size={18} /></span><strong>Help center</strong><Icon name="chevron" size={18} /></button><button className="settings-link" onClick={() => openTab('activity')}><span className="settings-icon"><Icon name="flag" size={18} /></span><strong>Report a scam</strong><Icon name="chevron" size={18} /></button></div>
+      <div className="content-section appearance-section"><h3>APPEARANCE</h3><div className="toggle-row"><span><strong>Dark mode</strong><small>Use a darker palette across PhishGuard.</small></span><Toggle label="Dark mode" checked={theme === 'dark'} onChange={(value) => setTheme(value ? 'dark' : 'light')} /></div></div>
       <div className="profile-footer"><Brand /><span>Version 1.0.0</span></div>
     </div>;
   }
@@ -821,6 +1112,69 @@ export default function App() {
     if (page === 'account') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Account</button><div className="setting-hero"><span className="profile-avatar large">{account.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</span><h2>{account.name}</h2><p>{account.email}</p></div><button className="outline-button sign-out-button" onClick={async () => { await logout(); setAuthStage('welcome'); }}>Sign out</button><p className="inbox-privacy">Your account is managed by the PhishGuard backend.</p></div>;
     if (page === 'support') return <div className="page-content"><button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Support</button><SectionTitle title="How can we help?" /><div className="support-card"><Icon name="help" /><strong>Stay safe online</strong><p>Never open unexpected links or share passwords and OTPs over messages.</p></div></div>;
     return renderActivity();
+  }
+
+  function renderIntegrationsPage() {
+    const telegramConnected = Boolean(integrationStatus?.telegram?.connected);
+    const whatsappConnected = Boolean(integrationStatus?.whatsapp?.connected);
+    const telegramAvailable = Boolean(integrationStatus?.telegram?.available);
+    const whatsappAvailable = Boolean(integrationStatus?.whatsapp?.available);
+    return <div className="page-content setting-page integrations-page">
+      <button className="back-link" onClick={() => setPage('')}><Icon name="back" size={18} /> Profile</button>
+      <header className="integrations-header">
+        <span className="integrations-kicker"><Icon name="lock" size={14} /> PRIVATE REPORT DELIVERY</span>
+        <h1>Connected<br />services<span className="brand-dot">.</span></h1>
+        <p>Choose where PhishGuard sends your completed dynamic analysis reports.</p>
+      </header>
+      <div className="integration-cards">
+      <article className="integration-card telegram-card">
+        <div className="integration-card-top">
+          <span className="integration-brand telegram-brand"><Icon name="telegram" size={28} /></span>
+          <span className={`connection-state ${telegramConnected ? 'connected' : ''}`}><i />{integrationLoading ? 'Checking' : telegramConnected ? 'Connected' : integrationStatus && !telegramAvailable ? 'Not configured' : 'Not connected'}</span>
+        </div>
+        <div className="integration-card-copy"><h2>Telegram</h2><p>{telegramAvailable ? 'Get the full PDF report delivered straight to your Telegram chat.' : 'Telegram delivery will be available when the PhishGuard bot is configured.'}</p></div>
+        <div className="integration-card-foot">
+          {telegramConnected
+            ? <button className="integration-button disconnect" disabled={integrationBusy} onClick={() => disconnectIntegration('telegram')}>Disconnect <Icon name="close" size={16} /></button>
+            : <button className="integration-button telegram-action" disabled={integrationBusy || integrationLoading || !telegramAvailable} onClick={() => connectIntegration('telegram')}>{telegramAvailable ? 'Connect Telegram' : 'Unavailable'} <Icon name="arrow" size={16} /></button>}
+        </div>
+      </article>
+      <article className="integration-card whatsapp-card">
+        <div className="integration-card-top">
+          <span className="integration-brand whatsapp-brand"><Icon name="whatsapp" size={28} /></span>
+          <span className={`connection-state ${whatsappConnected ? 'connected' : ''}`}><i />{integrationLoading ? 'Checking' : whatsappConnected ? 'Connected' : integrationStatus && !whatsappAvailable ? 'Not configured' : 'Not connected'}</span>
+        </div>
+        <div className="integration-card-copy"><h2>WhatsApp</h2><p>{whatsappAvailable ? 'Opt in with a one-time code. Reports arrive as secure PDF attachments.' : 'WhatsApp delivery will be available when the PhishGuard team account is configured.'}</p></div>
+        {integrationStatus?.whatsapp?.publicNumber && <div className="team-number"><span>PHISHGUARD TEAM</span><strong>{integrationStatus.whatsapp.publicNumber}</strong></div>}
+        <div className="integration-card-foot">
+          {whatsappConnected
+            ? <button className="integration-button disconnect" disabled={integrationBusy} onClick={() => disconnectIntegration('whatsapp')}>Disconnect <Icon name="close" size={16} /></button>
+            : <button className="integration-button whatsapp-action" disabled={integrationBusy || integrationLoading || !whatsappAvailable} onClick={() => connectIntegration('whatsapp')}>{whatsappAvailable ? 'Connect WhatsApp' : 'Unavailable'} <Icon name="arrow" size={16} /></button>}
+        </div>
+      </article>
+      </div>
+      {integrationCode && <div className="integration-code-card">
+        <span className={`integration-brand ${integrationCode.channel === 'telegram' ? 'telegram-brand' : 'whatsapp-brand'}`}><Icon name={integrationCode.channel === 'telegram' ? 'telegram' : 'whatsapp'} size={23} /></span>
+        <div><strong>Your one-time link code</strong><p>{integrationCode.instructions}</p><small>Expires in 10 minutes. Only send it to the PhishGuard bot or team account.</small>
+          {integrationCode.channel === 'telegram' && integrationCode.botUsername && <a className="integration-open-link" href={`https://t.me/${encodeURIComponent(integrationCode.botUsername)}?start=${encodeURIComponent(integrationCode.code)}`} target="_blank" rel="noopener noreferrer">Open Telegram <Icon name="arrow" size={14} /></a>}
+          {integrationCode.channel === 'whatsapp' && integrationCode.publicNumber && <a className="integration-open-link" href={`https://wa.me/${String(integrationCode.publicNumber).replace(/\D/g, '')}?text=${encodeURIComponent(`CONNECT ${integrationCode.code}`)}`} target="_blank" rel="noreferrer">Open WhatsApp <Icon name="arrow" size={14} /></a>}
+        </div>
+        <code>{integrationCode.code}</code>
+      </div>}
+      {integrationMessage && <p className="integration-message" role="status"><Icon name="shield" size={16} />{integrationMessage}</p>}
+      {!integrationLoading && !integrationStatus && <button className="integration-retry" onClick={async () => {
+        setIntegrationLoading(true);
+        setIntegrationMessage('');
+        try {
+          setIntegrationStatus(await getIntegrations());
+        } catch (statusError) {
+          setIntegrationMessage(statusError?.message || 'Could not load connected services.');
+        } finally {
+          setIntegrationLoading(false);
+        }
+      }}>Try loading again</button>}
+      <div className="integration-privacy"><span><Icon name="lock" size={17} /></span><p><strong>You’re in control</strong><small>Reports are only delivered to services you connect. Disconnect any time.</small></p></div>
+    </div>;
   }
 
   function renderMessageDetail() {
@@ -940,6 +1294,7 @@ export default function App() {
     if (page === 'scan-result') return renderScanResult();
     if (page === 'blocked') return renderBlocked();
     if (page === 'alert-details') return renderAlertDetails();
+    if (page === 'integrations') return renderIntegrationsPage();
     if (['protection', 'notifications', 'privacy', 'subscription', 'account', 'support'].includes(page)) return renderSettingPage();
     if (['message-details', 'blocked-details', 'conversation'].includes(page)) return renderMessageDetail();
     if (page === 'forensics') return <Forensics onBack={goBack} scan={scan} />;
@@ -947,11 +1302,12 @@ export default function App() {
     if (tab === 'home') return renderHome();
     if (tab === 'inbox') return renderInbox();
     if (tab === 'scan') return renderScan();
+    if (tab === 'sandbox') return renderSandbox();
     if (tab === 'activity') return renderActivity();
     return renderProfile();
   }
 
-  const topTab = ['home', 'inbox', 'scan', 'activity'].includes(tab);
+  const topTab = navItems.some((item) => item.id === tab);
   return <main className="app-shell">
     <aside className="desktop-sidebar">
       <Brand />
@@ -1069,8 +1425,7 @@ function Forensics({ onBack, scan }) {
 
   return <div className="page-content forensics-page">
     <button className="back-link" onClick={onBack}><Icon name="back" size={18} /> Digital forensics</button>
-    <p className="eyebrow">CASE SM-0241 / SAMPLE REPORT</p>
-    <h2 className="forensics-title">Link investigation.</h2>
+    <div className="forensics-heading"><span className="forensics-kicker"><Icon name="scan" size={14} /> DIGITAL FORENSICS <i /> SAMPLE CASE SM-0241</span><h2 className="forensics-title">Link investigation<span className="brand-dot">.</span></h2><p>Evidence-led breakdown of the captured message, its link and the signals behind this sample verdict.</p></div>
     <div className="forensic-alert"><Icon name="alert" /><span><strong>Likely phishing attempt</strong><small>Captured by AI monitoring system · sample</small></span><strong>HIGH RISK</strong></div>
 
     <section className="forensic-score-card" aria-label="Illustrative risk score">
@@ -1080,7 +1435,7 @@ function Forensics({ onBack, scan }) {
         <span className="risk-gauge-mark" aria-hidden="true">!</span>
       </div>
     </section>
-    <p className="chart-caption">Risk data from your PhishGuard account.</p>
+    <p className="chart-caption">Illustrative score and signals for this sample case, not a live scan result.</p>
 
     <section className="forensic-story">
       <div className="forensic-section-heading"><div><p className="eyebrow">THE STORY</p><h3>How this warning unfolded</h3></div></div>
@@ -1098,8 +1453,8 @@ function Forensics({ onBack, scan }) {
     </section>
 
     <section className="people-experiences">
-      <div className="forensic-section-heading"><div><p className="eyebrow">COMMUNITY PERSPECTIVE</p><h3>How people might react</h3></div></div>
-      <p className="chart-caption chart-intro">Community reaction data from your PhishGuard account.</p>
+      <div className="forensic-section-heading"><div><p className="eyebrow">ILLUSTRATIVE REACTIONS</p><h3>How people might react</h3></div></div>
+      <p className="chart-caption chart-intro">Example reactions for discussion, not verified community votes.</p>
       <div className="reaction-chart" role="img" aria-label="Illustrative sample of 100 reactions: 68 suspicious, 21 unsure, 11 looks safe">
         {reactions.map((reaction) => <div className="reaction-row" key={reaction.label}>
           <div className="reaction-label"><strong>{reaction.label}</strong><span>{reaction.count}%</span></div>
@@ -1116,9 +1471,9 @@ function Forensics({ onBack, scan }) {
     </section>
 
     <div className="content-section"><h3>Domain intelligence</h3><DetailField label="DOMAIN" value={activitySample.domain} /><DetailField label="REGISTRAR" value={<>{activitySample.registrar} <em>· sample</em></>} /><DetailField label="REGISTERED" value={<>{activitySample.registered} <em>· sample</em></>} /><DetailField label="SIGNAL" value={activitySample.signal} /></div>
-    <div className="content-section"><h3>Detection signals</h3>{signals.map((signal, index) => <div className="forensic-signal" key={signal.title}><span>0{index + 1}</span><div><strong>{signal.title}</strong><small>{signal.description}</small></div></div>)}</div>
-      {scan && scan.urlHash ? <CommunityVotes urlHash={scan.urlHash} /> : <div className="community-card"><div><strong>Community verdicts live on scan results</strong><small>Check a link to read and add community reports.</small></div></div>}
-    <p className="sample-note">Data from your PhishGuard account.</p>
+    <section className="forensic-next-steps"><span className="activity-section-icon"><Icon name="shield" size={17} /></span><div><h3>Recommended next steps</h3><ul><li>Don’t open the link or enter account details.</li><li>Verify the message using the service’s official app or website.</li><li>Report and block the sender if the message is unsolicited.</li></ul></div></section>
+    {scan && scan.urlHash ? <CommunityVotes urlHash={scan.urlHash} /> : <div className="community-card"><div><strong>Community verdicts live on scan results</strong><small>Check a link to read and add community reports.</small></div></div>}
+    <p className="sample-note">This digital forensics report is illustrative sample content.</p>
     <button className="outline-button" onClick={onBack}>Back to activity <Icon name="back" size={18} /></button>
   </div>;
 }

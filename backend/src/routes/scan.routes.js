@@ -4,12 +4,14 @@ const crypto = require('crypto');
 const Router = require('express').Router;
 const { asyncHandler } = require('../utils/asyncHandler');
 const { optionalAuth } = require('../middleware/auth');
-const { analyzeMessage } = require('../analyzer');
+const { analyze, analyzeMessage } = require('../analyzer');
 const { analyzeMessageWithGemini } = require('../services/gemini.service');
 const { verdictFromScore } = require('../utils/verdict');
 const { normalizeUrl } = require('../utils/normalizeUrl');
 const { findOrCreateUrl } = require('../services/urls.service');
 const { recordAlert } = require('../services/alerts.service');
+const { persistCheck } = require('../services/checks.service');
+const { queueAnalysis } = require('../services/analysis.service');
 
 const router = Router();
 
@@ -91,6 +93,32 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
     aiStatus: aiResult.status === 'ok' ? 'ok' : 'unavailable',
   });
 
+  let dynamicAnalysis = { status: 'not_triggered', reason: 'rule_score_below_threshold' };
+  const highestRiskLink = ruleResult.links
+    .map((link) => ({ link, result: analyze(link) }))
+    .sort((left, right) => right.result.score - left.result.score)[0];
+  if (highestRiskLink && highestRiskLink.result.score > 60) {
+    const parsed = normalizeUrl(highestRiskLink.link);
+    const analysisUrlId = findOrCreateUrl({
+      urlHash: parsed.hash,
+      normalizedUrl: parsed.normalized,
+      host: parsed.host,
+    });
+    const checkId = persistCheck({
+      userId: req.user ? req.user.id : null,
+      urlId: analysisUrlId,
+      score: highestRiskLink.result.score,
+      verdict: verdictFromScore(highestRiskLink.result.score),
+      aiStatus: 'unavailable',
+      signals: highestRiskLink.result.signals,
+    });
+    dynamicAnalysis = queueAnalysis({
+      userId: req.user ? req.user.id : null,
+      checkId,
+      ruleScore: highestRiskLink.result.score,
+    });
+  }
+
   res.locals.verdict = verdict;
   res.json({
     valid: true,
@@ -103,6 +131,7 @@ router.post('/', optionalAuth, asyncHandler(async (req, res) => {
     links: ruleResult.links,
     linkCount: ruleResult.links.length,
     alertId,
+    dynamicAnalysis,
   });
 }));
 
